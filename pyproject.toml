@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "chess_app"
+version = "0.1.0"
+description = "A chess desktop application"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{include = "chess_app"}]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+chess-app = "chess_app.main:main"
