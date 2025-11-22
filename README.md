@@ -1,6 +1,6 @@
 # Chess Desktop App
 
-A chess desktop application built with Python.
+A chess desktop application built with Python. The application is designed for one human player to play a game with bot player.
 
 ## Features
 
