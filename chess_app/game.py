@@ -10,7 +10,7 @@ are not exposed to the rest of the application.
 import chess
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 
 class GameStatus(Enum):
@@ -170,3 +170,161 @@ class Game:
         game._board = board
         game._move_history = []
         return game
+    
+    def get_legal_moves(self) -> list[Move]:
+        """
+        Get all legal moves in the current position.
+        
+        Queries the underlying python-chess Board for all legal moves and converts
+        them into domain Move objects suitable for UI consumption.
+        
+        Returns:
+            A list of Move instances representing all legal moves in the current
+            position. Each Move includes UCI notation, SAN notation, from/to squares,
+            and promotion information where applicable.
+        
+        Example:
+            game = Game()
+            legal_moves = game.get_legal_moves()
+            for move in legal_moves:
+                print(f"{move.san}: {move.uci}")
+        """
+        moves = []
+        for chess_move in self._board.legal_moves:
+            # Convert python-chess move to domain Move
+            uci = chess_move.uci()
+            san = self._board.san(chess_move)
+            from_square = chess.square_name(chess_move.from_square)
+            to_square = chess.square_name(chess_move.to_square)
+            
+            # Handle promotion
+            promotion = None
+            if chess_move.promotion is not None:
+                promotion = chess.piece_symbol(chess_move.promotion)
+            
+            moves.append(Move(
+                uci=uci,
+                san=san,
+                from_square=from_square,
+                to_square=to_square,
+                promotion=promotion
+            ))
+        
+        return moves
+    
+    def apply_move(self, move: Union[Move, str]) -> None:
+        """
+        Apply a move to the game.
+        
+        Accepts either a domain Move object or a UCI string, validates the move
+        is legal in the current position, and applies it to the board. The move
+        is added to the internal move history.
+        
+        Args:
+            move: Either a domain Move object or a UCI string (e.g., "e2e4" or "e7e8q"
+                 for promotion moves).
+        
+        Raises:
+            IllegalMoveError: If the move is not legal in the current position or
+                            cannot be parsed as a valid UCI move.
+        
+        Example:
+            game = Game()
+            # Apply using UCI string
+            game.apply_move("e2e4")
+            # Apply using Move object
+            moves = game.get_legal_moves()
+            game.apply_move(moves[0])
+        """
+        # Extract UCI string from Move object or use string directly
+        if isinstance(move, Move):
+            uci_str = move.uci
+        else:
+            uci_str = move
+        
+        # Parse UCI string to python-chess move
+        try:
+            chess_move = chess.Move.from_uci(uci_str)
+        except ValueError as e:
+            raise IllegalMoveError(
+                f"Invalid UCI move string: '{uci_str}'. "
+                f"Error details: {str(e)}"
+            ) from e
+        
+        # Validate the move is legal
+        if chess_move not in self._board.legal_moves:
+            raise IllegalMoveError(
+                f"Move '{uci_str}' is not legal in the current position. "
+                f"Current FEN: {self._board.fen()}"
+            )
+        
+        # Generate SAN before pushing the move (board state will change)
+        san = self._board.san(chess_move)
+        
+        # Apply the move to the board
+        self._board.push(chess_move)
+        
+        # Create domain Move and add to history
+        from_square = chess.square_name(chess_move.from_square)
+        to_square = chess.square_name(chess_move.to_square)
+        promotion = None
+        if chess_move.promotion is not None:
+            promotion = chess.piece_symbol(chess_move.promotion)
+        
+        domain_move = Move(
+            uci=uci_str,
+            san=san,
+            from_square=from_square,
+            to_square=to_square,
+            promotion=promotion
+        )
+        self._move_history.append(domain_move)
+    
+    def undo(self) -> None:
+        """
+        Undo the last move.
+        
+        Reverts the board state to before the last move was applied and removes
+        that move from the move history. Safe to call repeatedly until reaching
+        the initial position.
+        
+        If there are no moves to undo (history is empty), this method does nothing
+        (no-op behavior).
+        
+        Example:
+            game = Game()
+            game.apply_move("e2e4")
+            game.apply_move("e7e5")
+            game.undo()  # Reverts e7e5
+            game.undo()  # Reverts e2e4
+            game.undo()  # Safe no-op, already at starting position
+        """
+        # Check if there are moves to undo
+        if len(self._move_history) > 0:
+            # Revert the board state
+            self._board.pop()
+            # Remove the last move from history
+            self._move_history.pop()
+    
+    def get_history(self) -> tuple[Move, ...]:
+        """
+        Get a read-only view of the move history.
+        
+        Returns an immutable tuple containing all moves that have been applied
+        in this game, in chronological order.
+        
+        Returns:
+            A tuple of Move objects representing the complete move history.
+            The tuple is immutable to prevent external modification of the
+            game's internal state.
+        
+        Example:
+            game = Game()
+            game.apply_move("e2e4")
+            game.apply_move("e7e5")
+            history = game.get_history()
+            print(f"Moves played: {len(history)}")  # Prints: Moves played: 2
+            for move in history:
+                print(move.san)  # Prints: e4, e5
+        """
+        return tuple(self._move_history)
