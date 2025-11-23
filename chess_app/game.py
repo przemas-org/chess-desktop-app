@@ -7,6 +7,7 @@ The python-chess library types remain internal to this module and
 are not exposed to the rest of the application.
 """
 
+import chess
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -84,3 +85,88 @@ class InvalidPgnError(Exception):
     a malformed or invalid PGN string.
     """
     pass
+
+
+class Game:
+    """
+    Core game state manager and entry point for UI interaction with chess logic.
+    
+    This class serves as a thin wrapper around python-chess.Board, providing a clean
+    domain-level interface for the UI layer. It encapsulates the chess board state
+    and maintains a history of moves using domain Move objects.
+    
+    The Game class is the primary interface for the UI to interact with game state.
+    Internal python-chess types (chess.Board, chess.Move, etc.) are NOT exposed
+    directly to other parts of the application - all interactions should go through
+    this Game class and its domain types.
+    
+    Attributes:
+        _board: The internal python-chess Board instance that manages chess rules
+                and position state. This is kept private and not exposed to callers.
+        _move_history: A list of domain Move objects representing all moves made
+                      in this game. Starts empty and will be populated as moves
+                      are applied (in future implementations).
+    
+    Example:
+        # Create a new game with standard starting position
+        game = Game()
+        
+        # Create a game from a specific position
+        game = Game.from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")
+    """
+    
+    def __init__(self) -> None:
+        """
+        Initialize a new chess game with the standard starting position.
+        
+        Creates a new game with pieces arranged in the traditional chess
+        opening position (all pieces on their starting squares, white to move).
+        The move history starts empty.
+        """
+        self._board: chess.Board = chess.Board()
+        self._move_history: list[Move] = []
+    
+    @classmethod
+    def from_fen(cls, fen: str) -> "Game":
+        """
+        Create a Game instance from a FEN (Forsyth-Edwards Notation) string.
+        
+        FEN is a standard notation for describing a chess position. This method
+        constructs a Game with the board position specified by the FEN string.
+        The move history starts empty regardless of the position.
+        
+        Args:
+            fen: A valid FEN string representing the chess position. This should
+                 include all six FEN fields: piece placement, active color,
+                 castling rights, en passant square, halfmove clock, and
+                 fullmove number.
+        
+        Returns:
+            A new Game instance with the board position set according to the
+            provided FEN string.
+        
+        Raises:
+            InvalidFenError: If the provided FEN string is malformed or invalid.
+                            The exception message will include details about
+                            what was wrong with the FEN string.
+        
+        Example:
+            # Standard starting position
+            game = Game.from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+            
+            # Position after 1.e4
+            game = Game.from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")
+        """
+        try:
+            board = chess.Board(fen=fen)
+        except ValueError as e:
+            raise InvalidFenError(
+                f"Invalid FEN string provided: '{fen}'. "
+                f"Error details: {str(e)}"
+            ) from e
+        
+        # Create a new Game instance and set its internal state
+        game = cls.__new__(cls)
+        game._board = board
+        game._move_history = []
+        return game
