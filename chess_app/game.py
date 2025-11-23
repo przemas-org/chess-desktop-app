@@ -34,6 +34,17 @@ class GameStatus(Enum):
     DRAW_OTHER = "draw_other"
 
 
+class Side(Enum):
+    """Represents which side (color) is to move.
+    
+    Attributes:
+        WHITE: White pieces.
+        BLACK: Black pieces.
+    """
+    WHITE = "white"
+    BLACK = "black"
+
+
 @dataclass
 class Move:
     """
@@ -328,3 +339,141 @@ class Game:
                 print(move.san)  # Prints: e4, e5
         """
         return tuple(self._move_history)
+    
+    def get_status(self) -> GameStatus:
+        """
+        Get the current game status.
+        
+        Inspects the underlying chess board to determine the current state of the game,
+        checking for terminal conditions (checkmate, stalemate, draws) and non-terminal
+        conditions (check, ongoing).
+        
+        The method checks conditions in priority order:
+        1. Terminal conditions that end the game (checkmate, stalemate, draws)
+        2. Non-terminal special conditions (check)
+        3. Normal ongoing play
+        
+        Returns:
+            A GameStatus enum value representing the current state:
+            - CHECKMATE: The current player is in checkmate (game over, opponent wins)
+            - STALEMATE: The current player has no legal moves but is not in check (draw)
+            - DRAW_INSUFFICIENT_MATERIAL: Neither side has enough material to checkmate (draw)
+            - DRAW_50_MOVE: The fifty-move rule applies or can be claimed (draw)
+            - DRAW_OTHER: Another draw condition applies (e.g., threefold repetition)
+            - CHECK: The current player's king is under attack but the game continues
+            - ONGOING: Normal play with no special conditions
+        
+        Note:
+            This method is read-only and does not mutate the game state.
+            It is cheap to call repeatedly as it only queries board properties.
+        
+        Example:
+            game = Game()
+            game.apply_move("f2f3")
+            game.apply_move("e7e6")
+            game.apply_move("g2g4")
+            game.apply_move("d8h4")  # Fool's mate
+            status = game.get_status()
+            assert status == GameStatus.CHECKMATE
+        """
+        # Check terminal conditions first (game over states)
+        if self._board.is_checkmate():
+            return GameStatus.CHECKMATE
+        
+        if self._board.is_stalemate():
+            return GameStatus.STALEMATE
+        
+        if self._board.is_insufficient_material():
+            return GameStatus.DRAW_INSUFFICIENT_MATERIAL
+        
+        # Check fifty-move rule (both actual trigger and claimable)
+        if self._board.is_fifty_moves() or self._board.can_claim_fifty_moves():
+            return GameStatus.DRAW_50_MOVE
+        
+        # Check threefold repetition
+        if self._board.can_claim_threefold_repetition():
+            return GameStatus.DRAW_OTHER
+        
+        # Check non-terminal conditions
+        if self._board.is_check():
+            return GameStatus.CHECK
+        
+        # Normal ongoing play
+        return GameStatus.ONGOING
+    
+    def get_side_to_move(self) -> Side:
+        """
+        Get which side (color) is to move next.
+        
+        Returns the color of the side whose turn it is to make a move.
+        This is derived from the board's turn indicator.
+        
+        Returns:
+            Side.WHITE if it is White's turn to move, Side.BLACK if it is Black's turn.
+        
+        Note:
+            This method is read-only and does not mutate the game state.
+            It is cheap to call repeatedly as it only queries a board property.
+        
+        Example:
+            game = Game()
+            assert game.get_side_to_move() == Side.WHITE
+            game.apply_move("e2e4")
+            assert game.get_side_to_move() == Side.BLACK
+        """
+        return Side.WHITE if self._board.turn else Side.BLACK
+    
+    def get_fullmove_number(self) -> int:
+        """
+        Get the current full-move number.
+        
+        Returns the full-move number from the FEN position. This counter starts at 1
+        and increments after Black's move. In other words, after both White and Black
+        have each made one move, the full-move number becomes 2.
+        
+        Returns:
+            The current full-move number (starts at 1).
+        
+        Note:
+            This method is read-only and does not mutate the game state.
+            It is cheap to call repeatedly as it only queries a board property.
+        
+        Example:
+            game = Game()
+            assert game.get_fullmove_number() == 1
+            game.apply_move("e2e4")
+            assert game.get_fullmove_number() == 1  # Still move 1 (Black hasn't moved)
+            game.apply_move("e7e5")
+            assert game.get_fullmove_number() == 2  # Now move 2
+        """
+        return self._board.fullmove_number
+    
+    def get_halfmove_clock(self) -> int:
+        """
+        Get the current half-move clock.
+        
+        Returns the half-move clock (also known as the fifty-move counter) from the
+        FEN position. This counter tracks the number of half-moves (plies) since the
+        last pawn move or capture. It is used to enforce the fifty-move rule: if this
+        counter reaches 100 (meaning 50 full moves), either player can claim a draw.
+        
+        The counter resets to 0 after any pawn move or capture.
+        
+        Returns:
+            The current half-move clock value (0 or higher).
+        
+        Note:
+            This method is read-only and does not mutate the game state.
+            It is cheap to call repeatedly as it only queries a board property.
+        
+        Example:
+            game = Game()
+            assert game.get_halfmove_clock() == 0
+            game.apply_move("g1f3")  # Knight move, no pawn move or capture
+            assert game.get_halfmove_clock() == 1
+            game.apply_move("g8f6")
+            assert game.get_halfmove_clock() == 2
+            game.apply_move("e2e4")  # Pawn move, resets counter
+            assert game.get_halfmove_clock() == 0
+        """
+        return self._board.halfmove_clock
