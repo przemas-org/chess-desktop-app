@@ -679,8 +679,8 @@ class Game:
             for key, value in headers.items():
                 pgn_game.headers[key] = value
         
-        # Determine the result if not explicitly provided
-        if "Result" not in pgn_game.headers:
+        # Determine the result if not explicitly provided by user
+        if not headers or "Result" not in headers:
             if self._result is not None:
                 # Use result from imported PGN
                 pgn_game.headers["Result"] = self._result
