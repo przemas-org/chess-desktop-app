@@ -477,3 +477,41 @@ class Game:
             assert game.get_halfmove_clock() == 0
         """
         return self._board.halfmove_clock
+    
+    def export_fen(self) -> str:
+        """
+        Export the current position as a FEN string.
+        
+        Returns the complete FEN (Forsyth-Edwards Notation) representation of the
+        current board position, including all six FEN fields: piece placement,
+        active color, castling rights, en passant square, halfmove clock, and
+        fullmove number.
+        
+        This method can be used to save the current game state or to create
+        snapshots at specific points during gameplay. The exported FEN can later
+        be used with Game.from_fen() to recreate the exact position.
+        
+        Returns:
+            A FEN string representing the current position.
+        
+        Note:
+            This method is read-only and does not mutate the game state.
+            The exported FEN will always represent a valid chess position that
+            can be re-imported using Game.from_fen().
+        
+        Example:
+            game = Game()
+            fen = game.export_fen()
+            # Starting position FEN:
+            # "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            
+            game.apply_move("e2e4")
+            fen = game.export_fen()
+            # After 1.e4:
+            # "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+            
+            # Round-trip: export and re-import produces equivalent position
+            game2 = Game.from_fen(fen)
+            assert game2.export_fen() == fen
+        """
+        return self._board.fen()
