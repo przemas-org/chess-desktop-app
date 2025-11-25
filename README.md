@@ -43,6 +43,153 @@ poetry shell
 python -m chess_app.main
 ```
 
+## Developer Guide
+
+### The `Game` Model - Core API
+
+The `Game` class in `chess_app/game.py` is the central abstraction for managing chess game state and rules. **All UI and application code should interact with the game through this class.** The `python-chess` library is used internally but its types (`chess.Board`, `chess.Move`, etc.) are intentionally not exposed - always use the `Game` class API.
+
+#### Creating a Game
+
+```python
+from chess_app.game import Game
+
+# Create a new game with standard starting position
+game = Game()
+
+# Create a game from a FEN (Forsyth-Edwards Notation) string
+game = Game.from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")
+
+# Create a game from a PGN (Portable Game Notation) string
+pgn = """
+[Event "Example Game"]
+[Result "1-0"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 1-0
+"""
+game = Game.from_pgn(pgn)
+```
+
+#### Listing Legal Moves
+
+```python
+# Get all legal moves in the current position
+legal_moves = game.get_legal_moves()
+for move in legal_moves:
+    print(f"{move.san} ({move.uci}): {move.from_square} -> {move.to_square}")
+```
+
+#### Applying Moves
+
+```python
+# Apply a move using UCI notation (e.g., "e2e4")
+game.apply_move("e2e4")
+
+# Apply a move using a Move object
+legal_moves = game.get_legal_moves()
+game.apply_move(legal_moves[0])
+
+# For pawn promotion, include the promotion piece in UCI (e.g., "e7e8q")
+game.apply_move("e7e8q")  # Promote to queen
+```
+
+#### Undoing Moves
+
+```python
+# Undo the last move
+game.undo()
+
+# Safe to call multiple times - no-op when no moves to undo
+game.undo()
+game.undo()
+```
+
+#### Checking Game Status
+
+```python
+from chess_app.game import GameStatus, Side
+
+# Get current game status
+status = game.get_status()
+if status == GameStatus.CHECKMATE:
+    print("Checkmate!")
+elif status == GameStatus.CHECK:
+    print("Check!")
+elif status == GameStatus.STALEMATE:
+    print("Stalemate - Draw")
+
+# Get whose turn it is
+side = game.get_side_to_move()
+print(f"{'White' if side == Side.WHITE else 'Black'} to move")
+
+# Get move numbers and counters
+print(f"Move {game.get_fullmove_number()}")
+print(f"Halfmove clock: {game.get_halfmove_clock()}")
+```
+
+#### Accessing Move History
+
+```python
+# Get read-only tuple of all moves played
+history = game.get_history()
+for i, move in enumerate(history, 1):
+    print(f"{i}. {move.san}")
+```
+
+#### Exporting Game State
+
+```python
+# Export current position as FEN
+fen = game.export_fen()
+print(fen)
+# Example: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+
+# Export game as PGN with optional headers
+pgn = game.export_pgn({
+    "Event": "Casual Game",
+    "Site": "Home",
+    "Date": "2024.01.15",
+    "White": "Player 1",
+    "Black": "Player 2"
+})
+print(pgn)
+```
+
+#### Error Handling
+
+The `Game` class raises specific exceptions for invalid operations:
+
+```python
+from chess_app.game import IllegalMoveError, InvalidFenError, InvalidPgnError
+
+# IllegalMoveError - raised when attempting an illegal move
+try:
+    game.apply_move("e2e5")  # Illegal opening move
+except IllegalMoveError as e:
+    print(f"Illegal move: {e}")
+
+# InvalidFenError - raised when creating game from invalid FEN
+try:
+    game = Game.from_fen("invalid fen string")
+except InvalidFenError as e:
+    print(f"Invalid FEN: {e}")
+
+# InvalidPgnError - raised when creating game from invalid PGN
+try:
+    game = Game.from_pgn("not a valid pgn")
+except InvalidPgnError as e:
+    print(f"Invalid PGN: {e}")
+```
+
+#### Important Notes
+
+- **Do not interact with `chess.Board` directly** - use the `Game` class API
+- The `Game` class encapsulates all chess rules and state management
+- All domain types (`Move`, `GameStatus`, `Side`) are defined in `chess_app/game.py`
+- Move history is maintained automatically as moves are applied
+- `undo()` is safe to call even when there are no moves to undo (no-op)
+- FEN and PGN export/import provide full round-trip capability
+
 ## Development
 
 ### Running Tests
