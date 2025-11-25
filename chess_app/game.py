@@ -8,6 +8,8 @@ are not exposed to the rest of the application.
 """
 
 import chess
+import chess.pgn
+import io
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Union
@@ -136,6 +138,7 @@ class Game:
         """
         self._board: chess.Board = chess.Board()
         self._move_history: list[Move] = []
+        self._result: Optional[str] = None
     
     @classmethod
     def from_fen(cls, fen: str) -> "Game":
@@ -180,7 +183,107 @@ class Game:
         game = cls.__new__(cls)
         game._board = board
         game._move_history = []
+        game._result = None
         return game
+    
+    @classmethod
+    def from_pgn(cls, pgn_str: str) -> "Game":
+        """
+        Create a Game instance from a PGN (Portable Game Notation) string.
+        
+        PGN is a standard notation for recording chess games. This method parses
+        a PGN string containing a single game and constructs a Game instance by
+        replaying all moves from the initial position.
+        
+        Args:
+            pgn_str: A valid PGN string representing a single chess game. This should
+                    include move text and may include headers (Event, Site, Date, etc.).
+        
+        Returns:
+            A new Game instance with the board position after all moves have been
+            replayed and the move history populated with all moves from the PGN.
+        
+        Raises:
+            InvalidPgnError: If the provided PGN string is malformed, invalid, or
+                           empty. The exception message will include details about
+                           what was wrong with the PGN string.
+        
+        Example:
+            # Simple game
+            pgn = '''
+            [Event "Example Game"]
+            [Result "1-0"]
+            
+            1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 1-0
+            '''
+            game = Game.from_pgn(pgn)
+            
+            # Access game state
+            history = game.get_history()
+            print(f"Moves played: {len(history)}")  # Prints: Moves played: 6
+        """
+        try:
+            # Parse the PGN string using StringIO as a file-like object
+            pgn_io = io.StringIO(pgn_str)
+            parsed_game = chess.pgn.read_game(pgn_io)
+            
+            # Validate that a game was successfully parsed
+            if parsed_game is None:
+                raise InvalidPgnError(
+                    "Failed to parse PGN: no valid game found in the provided string"
+                )
+            
+            # Extract the result from headers for later use in export
+            result = parsed_game.headers.get("Result", "*")
+            
+            # Create a new Game instance starting from initial position
+            game = cls.__new__(cls)
+            game._board = chess.Board()
+            game._move_history = []
+            game._result = result
+            
+            # Replay all moves to build move history and reach final position
+            temp_board = chess.Board()
+            for chess_move in parsed_game.mainline_moves():
+                # Generate SAN before pushing (board state will change)
+                san = temp_board.san(chess_move)
+                
+                # Get move details
+                uci = chess_move.uci()
+                from_square = chess.square_name(chess_move.from_square)
+                to_square = chess.square_name(chess_move.to_square)
+                
+                # Handle promotion
+                promotion = None
+                if chess_move.promotion is not None:
+                    promotion = chess.piece_symbol(chess_move.promotion)
+                
+                # Create domain Move and add to history
+                domain_move = Move(
+                    uci=uci,
+                    san=san,
+                    from_square=from_square,
+                    to_square=to_square,
+                    promotion=promotion
+                )
+                game._move_history.append(domain_move)
+                
+                # Push move to temporary board
+                temp_board.push(chess_move)
+            
+            # Set the final board position
+            game._board = temp_board
+            
+            return game
+            
+        except InvalidPgnError:
+            # Re-raise our custom exception as-is
+            raise
+        except Exception as e:
+            # Catch any other parsing errors and convert to InvalidPgnError
+            raise InvalidPgnError(
+                f"Failed to parse PGN: {str(e)}"
+            ) from e
     
     def get_legal_moves(self) -> list[Move]:
         """
@@ -515,3 +618,97 @@ class Game:
             assert game2.export_fen() == fen
         """
         return self._board.fen()
+    
+    def export_pgn(self, headers: Optional[dict[str, str]] = None) -> str:
+        """
+        Export the game as a PGN (Portable Game Notation) string.
+        
+        Constructs a PGN string from the internal move history and optional header
+        metadata. The Result header is automatically determined from the current
+        game state unless explicitly provided in the headers parameter.
+        
+        Args:
+            headers: Optional dictionary of PGN headers to include in the exported
+                    game. Common headers include Event, Site, Date, Round, White,
+                    Black, and Result. If not provided or if certain standard headers
+                    are missing, default values will be used.
+        
+        Returns:
+            A PGN string representing the complete game with headers and moves.
+        
+        Note:
+            This method is read-only and does not mutate the game state.
+            The PGN will include all moves from the move history, and the Result
+            header will be automatically determined if not explicitly provided.
+        
+        Example:
+            game = Game()
+            game.apply_move("e2e4")
+            game.apply_move("e7e5")
+            
+            # Export with default headers
+            pgn = game.export_pgn()
+            
+            # Export with custom headers
+            pgn = game.export_pgn({
+                "Event": "World Championship",
+                "Site": "London",
+                "Date": "2024.01.15",
+                "White": "Player 1",
+                "Black": "Player 2"
+            })
+            
+            # Round-trip: export and re-import preserves game state
+            pgn = game.export_pgn()
+            game2 = Game.from_pgn(pgn)
+            assert game2.export_fen() == game.export_fen()
+        """
+        # Create a new PGN game
+        pgn_game = chess.pgn.Game()
+        
+        # Set default headers
+        pgn_game.headers["Event"] = "?"
+        pgn_game.headers["Site"] = "?"
+        pgn_game.headers["Date"] = "????.??.??"
+        pgn_game.headers["Round"] = "?"
+        pgn_game.headers["White"] = "?"
+        pgn_game.headers["Black"] = "?"
+        
+        # Merge user-provided headers
+        if headers:
+            for key, value in headers.items():
+                pgn_game.headers[key] = value
+        
+        # Determine the result if not explicitly provided
+        if "Result" not in pgn_game.headers:
+            if self._result is not None:
+                # Use result from imported PGN
+                pgn_game.headers["Result"] = self._result
+            else:
+                # Derive result from current board state
+                status = self.get_status()
+                if status == GameStatus.CHECKMATE:
+                    # Determine winner based on whose turn it is (they lost)
+                    if self._board.turn:  # White to move means White is in checkmate
+                        pgn_game.headers["Result"] = "0-1"
+                    else:  # Black to move means Black is in checkmate
+                        pgn_game.headers["Result"] = "1-0"
+                elif status in (GameStatus.STALEMATE, GameStatus.DRAW_50_MOVE,
+                              GameStatus.DRAW_INSUFFICIENT_MATERIAL, GameStatus.DRAW_OTHER):
+                    pgn_game.headers["Result"] = "1/2-1/2"
+                else:
+                    # Game is ongoing or in check
+                    pgn_game.headers["Result"] = "*"
+        
+        # Add moves to the PGN game
+        node = pgn_game
+        for domain_move in self._move_history:
+            # Convert domain Move back to chess.Move using UCI
+            chess_move = chess.Move.from_uci(domain_move.uci)
+            node = node.add_variation(chess_move)
+        
+        # Export to string using StringIO
+        exporter = chess.pgn.StringExporter(headers=True, variations=True, comments=True)
+        pgn_string = pgn_game.accept(exporter)
+        
+        return pgn_string
