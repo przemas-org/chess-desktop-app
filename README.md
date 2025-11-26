@@ -43,6 +43,15 @@ poetry shell
 python -m chess_app.main
 ```
 
+### Running the GUI
+
+The GUI displays the current chess position using Unicode chess pieces. The application window shows:
+- An 8×8 chessboard with classic beige/brown squares
+- Chess pieces rendered as Unicode glyphs
+- Automatic board scaling and centering on window resize
+
+The board orientation is fixed with white at the bottom (standard chess perspective).
+
 ## Developer Guide
 
 ### The `Game` Model - Core API
@@ -189,6 +198,84 @@ except InvalidPgnError as e:
 - Move history is maintained automatically as moves are applied
 - `undo()` is safe to call even when there are no moves to undo (no-op)
 - FEN and PGN export/import provide full round-trip capability
+
+### GUI Architecture
+
+The application features a PySide6-based desktop GUI for displaying chess positions.
+
+#### BoardWidget - FEN-View Component
+
+The `BoardWidget` class (`chess_app/gui/board_widget.py`) is a pure view component that:
+- Renders chess positions from FEN strings
+- Operates independently of the `Game` model
+- Displays pieces using Unicode chess glyphs (♔♕♖♗♘♙)
+- Automatically scales and centers the board within available space
+- Maintains fixed orientation: white at bottom, black at top (rank 1 at bottom, rank 8 at top)
+
+**Key API:**
+```python
+from chess_app.gui import BoardWidget
+
+widget = BoardWidget()
+widget.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+# Board updates immediately
+```
+
+**Board Orientation:**
+- Rank 8 (black pieces) at top
+- Rank 1 (white pieces) at bottom
+- Files a-h from left to right
+- a1 square is dark (bottom-left)
+
+#### MainWindow Integration
+
+The `MainWindow` class integrates `BoardWidget` as its central widget and provides a FEN-based API:
+
+```python
+from chess_app.gui import MainWindow
+
+window = MainWindow()
+window.set_board_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+window.show()
+```
+
+Communication between `Game` model and GUI is via FEN strings only.
+
+#### GUI Entry Point
+
+The main entry point (`chess_app/main.py`) bootstraps the Qt application:
+
+```python
+from PySide6.QtWidgets import QApplication
+from chess_app.game import Game
+from chess_app.gui import MainWindow
+
+app = QApplication([])
+game = Game()
+window = MainWindow()
+window.set_board_fen(game.export_fen())
+window.show()
+app.exec()
+```
+
+Run via: `poetry run chess-app`
+
+#### Environment Prerequisites
+
+**Required:**
+- Python 3.9 or higher
+- PySide6 (installed via `poetry install`)
+- Display server (X11, Wayland, or equivalent)
+
+**Headless Environments:**
+- GUI cannot run without a display server
+- Tests gracefully skip in headless CI/CD environments
+- For headless testing with GUI, use Xvfb or similar virtual display
+
+**Font Requirements:**
+- Unicode chess piece glyphs (U+2654-U+265F)
+- Default font: "DejaVu Serif" (fallback to system default)
+- Most modern systems include chess piece glyphs in default fonts
 
 ## Development
 

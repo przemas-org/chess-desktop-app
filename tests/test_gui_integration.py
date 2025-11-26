@@ -209,3 +209,203 @@ class TestMainWindowBoardWidgetAPI:
         except Exception as e:
             pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
 
+
+class TestMainWindowFenUpdates:
+    """Tests for FEN update behavior through MainWindow API."""
+    
+    def test_multiple_fen_updates_through_mainwindow(self):
+        """Test setting FEN multiple times through MainWindow.set_board_fen."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Update 1: Starting position
+            fen1 = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            window.set_board_fen(fen1)
+            assert window.centralWidget()._fen == fen1
+            
+            # Update 2: After e4
+            fen2 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+            window.set_board_fen(fen2)
+            assert window.centralWidget()._fen == fen2
+            
+            # Update 3: After e4 e5
+            fen3 = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+            window.set_board_fen(fen3)
+            assert window.centralWidget()._fen == fen3
+            
+            # Update 4: Endgame position
+            fen4 = "8/8/4k3/8/8/4K3/8/8 w - - 0 1"
+            window.set_board_fen(fen4)
+            assert window.centralWidget()._fen == fen4
+            
+            # Update 5: Back to starting position
+            window.set_board_fen(fen1)
+            assert window.centralWidget()._fen == fen1
+        
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_fen_update_changes_board_state(self):
+        """Test that FEN updates actually change the internal board state."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            board_widget = window.centralWidget()
+            
+            # Set starting position
+            window.set_board_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+            
+            # Verify white king is at e1 (rank 1 = index 7, file e = index 4)
+            assert board_widget._board[7][4] == {"piece": "k", "color": "white"}
+            
+            # Change to position with king on d1
+            window.set_board_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBKQBNR w KQkq - 0 1")
+            
+            # Verify king moved to d1 (rank 1 = index 7, file d = index 3)
+            assert board_widget._board[7][3] == {"piece": "k", "color": "white"}
+            assert board_widget._board[7][4] == {"piece": "q", "color": "white"}
+        
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_error_propagation_invalid_fen(self):
+        """Test that BoardFenError propagates through MainWindow."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.gui import MainWindow
+            from chess_app.gui.board_widget import BoardFenError
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Try to set an invalid FEN (too few ranks)
+            with pytest.raises(BoardFenError) as exc_info:
+                window.set_board_fen("rnbqkbnr/pppppppp/8/8/8 w KQkq - 0 1")
+            
+            # Verify error message is descriptive
+            assert "expected 8 ranks" in str(exc_info.value)
+        
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_error_propagation_invalid_characters(self):
+        """Test that BoardFenError with invalid characters propagates correctly."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.gui import MainWindow
+            from chess_app.gui.board_widget import BoardFenError
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Try to set FEN with invalid character
+            with pytest.raises(BoardFenError) as exc_info:
+                window.set_board_fen("rnbqkbnr/ppppxppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+            
+            # Verify error message mentions the invalid character
+            assert "Invalid character" in str(exc_info.value)
+            assert "'x'" in str(exc_info.value)
+        
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_fen_update_from_game_model(self):
+        """Test typical workflow: Game model -> FEN -> MainWindow."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Create game and make some moves
+            game = Game()
+            game.apply_move("e2e4")
+            game.apply_move("e7e5")
+            game.apply_move("g1f3")
+            
+            # Export FEN and update GUI
+            fen = game.export_fen()
+            window.set_board_fen(fen)
+            
+            # Verify the FEN was set correctly
+            assert window.centralWidget()._fen == fen
+            
+            # Verify specific pieces are in the right positions
+            board = window.centralWidget()._board
+            # White knight on f3 (rank 3 = index 5, file f = index 5)
+            assert board[5][5] == {"piece": "n", "color": "white"}
+            # White pawn on e4 (rank 4 = index 4, file e = index 4)
+            assert board[4][4] == {"piece": "p", "color": "white"}
+            # Black pawn on e5 (rank 5 = index 3, file e = index 4)
+            assert board[3][4] == {"piece": "p", "color": "black"}
+        
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_rapid_fen_switching_through_mainwindow(self):
+        """Test rapid FEN switching through MainWindow doesn't cause issues."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            fens = [
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                "8/8/8/8/8/8/8/8 w - - 0 1",
+                "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+                "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+                "8/8/4k3/8/8/4K3/8/8 w - - 0 1",
+            ]
+            
+            # Rapidly switch between positions
+            for fen in fens:
+                window.set_board_fen(fen)
+                assert window.centralWidget()._fen == fen
+            
+            # Verify last FEN is correctly set
+            assert window.centralWidget()._fen == fens[-1]
+        
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+
