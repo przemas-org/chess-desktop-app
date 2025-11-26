@@ -7,8 +7,9 @@ readme = "README.md"
 packages = [{include = "chess_app"}]
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = ">=3.9,<3.15"
 python-chess = ">=1.999,<2.0"
+pyside6 = "^6.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
