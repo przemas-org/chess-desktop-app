@@ -6,7 +6,26 @@ based on FEN (Forsyth-Edwards Notation) strings.
 
 from typing import Optional
 from PySide6.QtWidgets import QWidget
-from PySide6.QtGui import QPaintEvent
+from PySide6.QtCore import Qt, QRect, QSize
+from PySide6.QtGui import QPaintEvent, QPainter, QColor, QFont
+
+
+# Unicode chess piece glyphs mapping
+# Maps (piece_type, color) tuples to their Unicode representations
+PIECE_UNICODE: dict[tuple[str, str], str] = {
+    ("p", "white"): "\u2659",  # ♙ White Pawn
+    ("n", "white"): "\u2658",  # ♘ White Knight
+    ("b", "white"): "\u2657",  # ♗ White Bishop
+    ("r", "white"): "\u2656",  # ♖ White Rook
+    ("q", "white"): "\u2655",  # ♕ White Queen
+    ("k", "white"): "\u2654",  # ♔ White King
+    ("p", "black"): "\u265F",  # ♟ Black Pawn
+    ("n", "black"): "\u265E",  # ♞ Black Knight
+    ("b", "black"): "\u265D",  # ♝ Black Bishop
+    ("r", "black"): "\u265C",  # ♜ Black Rook
+    ("q", "black"): "\u265B",  # ♛ Black Queen
+    ("k", "black"): "\u265A",  # ♚ Black King
+}
 
 
 class BoardFenError(Exception):
@@ -42,6 +61,17 @@ class BoardWidget(QWidget):
         self._board: list[list[Optional[dict]]] = [
             [None for _ in range(8)] for _ in range(8)
         ]
+    
+    def sizeHint(self) -> QSize:
+        """Provide a size hint for the widget.
+        
+        Returns a square size hint to encourage square layouts when this
+        widget is used as the main window's central widget or in layouts.
+        
+        Returns:
+            A QSize of 480×480 pixels (60 pixels per square × 8 squares).
+        """
+        return QSize(480, 480)
     
     def set_fen(self, fen: str) -> None:
         """Set the board position from a FEN string.
@@ -118,14 +148,125 @@ class BoardWidget(QWidget):
         # Trigger repaint
         self.update()
     
-    def paintEvent(self, event: QPaintEvent) -> None:
-        """Paint event handler (stub implementation).
+    def _calculate_layout(self, width: int, height: int) -> tuple[int, int, int]:
+        """Calculate board layout parameters for the given widget dimensions.
         
-        This is a stub implementation. Actual painting logic will be
-        implemented in a future ticket.
+        This method computes the square size and centering margins needed to
+        render an 8×8 chessboard within the available space. The board is
+        centered within the widget, with any extra space becoming padding.
+        
+        Args:
+            width: Available width in pixels.
+            height: Available height in pixels.
+        
+        Returns:
+            A tuple of (square_size, x_margin, y_margin) where:
+            - square_size: Size of each square in pixels (integer)
+            - x_margin: Horizontal offset to center the board
+            - y_margin: Vertical offset to center the board
+        
+        Example:
+            # For a 800×800 widget
+            square_size, x_margin, y_margin = self._calculate_layout(800, 800)
+            # Returns: (100, 0, 0)
+            
+            # For a 850×800 widget
+            square_size, x_margin, y_margin = self._calculate_layout(850, 800)
+            # Returns: (100, 25, 0)
+        """
+        # Square size is limited by the smaller dimension
+        square_size = min(width, height) // 8
+        
+        # Calculate margins to center the board
+        board_width = square_size * 8
+        board_height = square_size * 8
+        x_margin = (width - board_width) // 2
+        y_margin = (height - board_height) // 2
+        
+        return square_size, x_margin, y_margin
+    
+    def paintEvent(self, event: QPaintEvent) -> None:
+        """Paint the chessboard with pieces using Unicode glyphs.
+        
+        Renders an 8×8 chessboard with alternating light and dark squares,
+        and draws chess pieces as Unicode characters. The board is centered
+        within the widget with uniform margins.
+        
+        Layout:
+        - Square size is computed as min(width, height) // 8
+        - Board is centered with equal margins on all sides
+        - Light squares: #F0D9B5 (classic beige)
+        - Dark squares: #B58863 (classic brown)
+        - Pieces are rendered in "DejaVu Serif" font at 60% of square size
+        
+        Board orientation:
+        - Rank 8 (black pieces) at top (board index 0)
+        - Rank 1 (white pieces) at bottom (board index 7)
+        - Files a-h from left to right (board indices 0-7)
+        
+        Manual verification steps:
+        - Run app and load standard starting position
+        - Verify white pieces appear at bottom, black at top
+        - Verify light/dark square alternation (a1 is dark square)
+        - Test window resizing maintains board centering and proportions
+        - Verify pieces remain visible at different window sizes
         
         Args:
             event: The paint event.
         """
-        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Get widget dimensions and calculate layout
+        width = self.width()
+        height = self.height()
+        square_size, x_margin, y_margin = self._calculate_layout(width, height)
+        
+        # Define square colors (classic beige/brown)
+        light_square = QColor("#F0D9B5")
+        dark_square = QColor("#B58863")
+        
+        # Draw the 8×8 board
+        for rank in range(8):
+            for file in range(8):
+                # Determine square color: (rank + file) % 2 == 0 for light squares
+                # Note: In chess, a1 is a dark square (rank=0, file=0 in bottom-left)
+                # Our board has rank 0 at top, so we need to adjust
+                is_light = (rank + file) % 2 != 0
+                color = light_square if is_light else dark_square
+                
+                # Calculate square position
+                x = x_margin + file * square_size
+                y = y_margin + rank * square_size
+                
+                # Draw the square
+                painter.fillRect(x, y, square_size, square_size, color)
+        
+        # Set up font for piece rendering (60% of square size)
+        font = QFont("DejaVu Serif")
+        font.setPixelSize(int(square_size * 0.6))
+        painter.setFont(font)
+        
+        # Draw pieces
+        for rank in range(8):
+            for file in range(8):
+                piece_data = self._board[rank][file]
+                
+                if piece_data is not None:
+                    # Get the Unicode glyph for this piece
+                    piece_key = (piece_data["piece"], piece_data["color"])
+                    glyph = PIECE_UNICODE.get(piece_key, "")
+                    
+                    if glyph:
+                        # Calculate square bounds
+                        x = x_margin + file * square_size
+                        y = y_margin + rank * square_size
+                        rect = QRect(x, y, square_size, square_size)
+                        
+                        # Draw the piece glyph centered in the square
+                        painter.drawText(
+                            rect,
+                            Qt.AlignmentFlag.AlignCenter,
+                            glyph
+                        )
 
