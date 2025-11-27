@@ -4,6 +4,8 @@ from typing import Optional
 from PySide6.QtWidgets import QMainWindow
 from PySide6.QtCore import Qt
 from .board_widget import BoardWidget
+from .engine_controller import EngineController
+from .engine_integration import EngineAdapter
 from ..game import Game, IllegalMoveError
 
 
@@ -41,6 +43,10 @@ class MainWindow(QMainWindow):
         self._selected_source: Optional[str] = None
         self._legal_destinations: set[str] = set()
         
+        # Engine components (optional, may be None if engine not available)
+        self._engine_adapter: Optional[EngineAdapter] = None
+        self._engine_controller: Optional[EngineController] = None
+        
         # Connect board widget signals
         self._board_widget.square_clicked.connect(self._on_square_clicked)
     
@@ -67,6 +73,42 @@ class MainWindow(QMainWindow):
             window.update_board_from_game()
         """
         self._game = game
+    
+    def set_engine_adapter(self, adapter: EngineAdapter) -> None:
+        """Set the engine adapter and create the engine controller.
+        
+        This method should be called after set_game() to enable engine play.
+        It creates an EngineController that coordinates between the Game and
+        the adapter, handling automated engine moves for Black.
+        
+        Args:
+            adapter: An initialized EngineAdapter instance.
+        
+        Example:
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            
+            adapter = StockfishProcessAdapter("/path/to/stockfish")
+            adapter.initialize()
+            window.set_engine_adapter(adapter)
+        """
+        if self._game is None:
+            raise RuntimeError(
+                "Cannot set engine adapter: no game has been set. "
+                "Call set_game() first."
+            )
+        
+        self._engine_adapter = adapter
+        self._engine_controller = EngineController(self._game, adapter)
+        
+        # Connect controller signals
+        self._engine_controller.engine_move_applied.connect(
+            self.update_board_from_game
+        )
+        self._engine_controller.engine_disabled.connect(
+            self._on_engine_disabled
+        )
     
     def update_board_from_game(self) -> None:
         """Update the board display from the current game state.
@@ -230,6 +272,10 @@ class MainWindow(QMainWindow):
             # Clear selection after successful move
             self._clear_selection()
             
+            # Trigger engine move if available
+            if self._engine_controller:
+                self._engine_controller.on_human_move_applied()
+            
         except IllegalMoveError:
             # If move is somehow illegal, clear selection silently
             self._clear_selection()
@@ -247,4 +293,17 @@ class MainWindow(QMainWindow):
         self._legal_destinations = set()
         self._board_widget.set_selected_square(None)
         self._board_widget.set_highlighted_squares([])
+    
+    def _on_engine_disabled(self, reason: str) -> None:
+        """Handle engine being permanently disabled.
+        
+        This is called when the engine controller disables the engine due to
+        repeated failures or errors. Currently just logs the reason silently.
+        Future versions may show a user notification.
+        
+        Args:
+            reason: Human-readable description of why engine was disabled.
+        """
+        # For v1, silently disable. Could add UI notification in future.
+        pass
 
