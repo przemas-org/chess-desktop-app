@@ -433,9 +433,14 @@ class TestStockfishAdapterRequestMove:
         assert error_data[0][0] == EngineErrorCode.INVALID_REQUEST
     
     def test_request_move_in_ready_state_transitions_to_busy(self, qt_app):
-        """request_move() in READY state should transition to BUSY (then back to READY in stub)."""
+        """request_move() in READY state should transition to BUSY."""
         adapter = StockfishProcessAdapter("/usr/bin/stockfish")
         adapter._state = EngineState.READY
+        
+        # Mock process
+        mock_process = Mock()
+        mock_process.state.return_value = QProcess.ProcessState.Running
+        adapter._process = mock_process
         
         # Track move signal
         move_data = []
@@ -447,10 +452,10 @@ class TestStockfishAdapterRequestMove:
         # Process events
         qt_app.processEvents()
         
-        # In stub implementation, immediately returns to READY with placeholder move
-        assert adapter.get_state() == EngineState.READY
-        assert len(move_data) == 1
-        assert move_data[0] == "e7e5"  # Placeholder move
+        # Should transition to BUSY and wait for response
+        assert adapter.get_state() == EngineState.BUSY
+        assert adapter._pending_request_fen == fen
+        assert adapter._move_timeout_timer is not None
     
     def test_request_move_in_busy_state_emits_error(self, qt_app):
         """request_move() in BUSY state should emit INVALID_REQUEST."""
@@ -549,15 +554,26 @@ class TestStockfishAdapterStateTransitions:
         
         assert adapter.get_state() == EngineState.ERROR
     
-    def test_ready_to_busy_to_ready_in_stub(self, qt_app):
-        """Test READY → BUSY → READY transition in stubbed move request."""
+    def test_ready_to_busy_to_ready_on_bestmove(self, qt_app):
+        """Test READY → BUSY → READY transition on receiving bestmove."""
         adapter = StockfishProcessAdapter("/usr/bin/stockfish")
         adapter._state = EngineState.READY
+        
+        # Mock process
+        mock_process = Mock()
+        mock_process.state.return_value = QProcess.ProcessState.Running
+        adapter._process = mock_process
         
         fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
         adapter.request_move(fen)
         
-        # In stub, immediately returns to READY
+        # Should be in BUSY state
+        assert adapter.get_state() == EngineState.BUSY
+        
+        # Simulate receiving bestmove
+        adapter._process_bestmove_line("e7e5")
+        
+        # Should transition back to READY
         assert adapter.get_state() == EngineState.READY
 
 
@@ -612,4 +628,336 @@ class TestStockfishAdapterIOHandling:
         
         assert adapter._handshake_phase == "uci_sent"
         assert adapter.get_state() == EngineState.INITIALIZING
+
+
+class TestStockfishAdapterMoveRequests:
+    """Tests for UCI move request/response flow and timeout handling."""
+    
+    def test_successful_bestmove_parsing(self, qt_app):
+        """Successful bestmove response should emit move_ready signal with UCI move."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Track signal emission
+        move_data = []
+        adapter.move_ready.connect(lambda move: move_data.append(move))
+        
+        # Setup - adapter is in BUSY state with mock process
+        adapter._state = EngineState.BUSY
+        adapter._process = Mock()
+        mock_timer = Mock()
+        adapter._move_timeout_timer = mock_timer
+        adapter._pending_request_fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        
+        # Simulate receiving bestmove
+        adapter._output_buffer = "bestmove e7e5\n"
+        
+        # Process the line
+        while '\n' in adapter._output_buffer:
+            line, adapter._output_buffer = adapter._output_buffer.split('\n', 1)
+            line = line.strip()
+            if line and adapter._state == EngineState.BUSY:
+                if line.startswith("bestmove "):
+                    tokens = line.split()
+                    if len(tokens) >= 2:
+                        adapter._process_bestmove_line(tokens[1])
+        
+        # Process events
+        qt_app.processEvents()
+        
+        # Verify state and signal
+        assert adapter.get_state() == EngineState.READY
+        assert len(move_data) == 1
+        assert move_data[0] == "e7e5"
+        mock_timer.stop.assert_called_once()
+        assert adapter._pending_request_fen is None
+    
+    def test_bestmove_with_ponder(self, qt_app):
+        """Bestmove with ponder should extract only the first move."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Track signal emission
+        move_data = []
+        adapter.move_ready.connect(lambda move: move_data.append(move))
+        
+        # Setup
+        adapter._state = EngineState.BUSY
+        adapter._process = Mock()
+        mock_timer = Mock()
+        adapter._move_timeout_timer = mock_timer
+        
+        # Simulate receiving bestmove with ponder
+        adapter._output_buffer = "bestmove e7e5 ponder e2e4\n"
+        
+        # Process the line
+        while '\n' in adapter._output_buffer:
+            line, adapter._output_buffer = adapter._output_buffer.split('\n', 1)
+            line = line.strip()
+            if line and adapter._state == EngineState.BUSY:
+                if line.startswith("bestmove "):
+                    tokens = line.split()
+                    if len(tokens) >= 2:
+                        adapter._process_bestmove_line(tokens[1])
+        
+        # Process events
+        qt_app.processEvents()
+        
+        # Verify only the move is extracted, not ponder
+        assert len(move_data) == 1
+        assert move_data[0] == "e7e5"
+    
+    def test_info_lines_ignored(self, qt_app):
+        """Info lines from engine should be ignored during move request."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Track signal emission
+        move_data = []
+        adapter.move_ready.connect(lambda move: move_data.append(move))
+        
+        # Setup
+        adapter._state = EngineState.BUSY
+        adapter._process = Mock()
+        mock_timer = Mock()
+        adapter._move_timeout_timer = mock_timer
+        
+        # Simulate receiving info lines followed by bestmove
+        adapter._output_buffer = "info depth 1 score cp 20\ninfo depth 2 score cp 25\nbestmove e7e5\n"
+        
+        # Process all lines
+        while '\n' in adapter._output_buffer:
+            line, adapter._output_buffer = adapter._output_buffer.split('\n', 1)
+            line = line.strip()
+            if line and adapter._state == EngineState.BUSY:
+                if line.startswith("info "):
+                    continue
+                if line.startswith("bestmove "):
+                    tokens = line.split()
+                    if len(tokens) >= 2:
+                        adapter._process_bestmove_line(tokens[1])
+        
+        # Process events
+        qt_app.processEvents()
+        
+        # Verify only bestmove was processed
+        assert len(move_data) == 1
+        assert move_data[0] == "e7e5"
+    
+    def test_move_timeout_transitions_to_error(self, qt_app):
+        """Move timeout should emit move_failed with TIMEOUT and transition to ERROR."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Track error signal
+        error_data = []
+        adapter.move_failed.connect(
+            lambda code, msg: error_data.append((code, msg))
+        )
+        
+        # Setup - adapter is in BUSY state
+        adapter._state = EngineState.BUSY
+        adapter._process = Mock()
+        adapter._process.state.return_value = QProcess.ProcessState.Running
+        mock_timer = Mock()
+        mock_timer.interval.return_value = 1000
+        adapter._move_timeout_timer = mock_timer
+        adapter._pending_request_fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        
+        # Simulate timeout
+        adapter._on_move_timeout()
+        
+        # Process events
+        qt_app.processEvents()
+        
+        # Verify error signal and state
+        assert len(error_data) == 1
+        assert error_data[0][0] == EngineErrorCode.TIMEOUT
+        assert "1000ms" in error_data[0][1]
+        assert adapter.get_state() == EngineState.ERROR
+        mock_timer.stop.assert_called_once()
+        assert adapter._pending_request_fen is None
+    
+    def test_bestmove_cancels_timeout(self, qt_app):
+        """Receiving bestmove should stop the timeout timer."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Track signals
+        move_data = []
+        error_data = []
+        adapter.move_ready.connect(lambda move: move_data.append(move))
+        adapter.move_failed.connect(lambda code, msg: error_data.append((code, msg)))
+        
+        # Setup
+        adapter._state = EngineState.BUSY
+        adapter._process = Mock()
+        mock_timer = Mock()
+        adapter._move_timeout_timer = mock_timer
+        
+        # Receive bestmove before timeout
+        adapter._process_bestmove_line("e7e5")
+        
+        # Process events
+        qt_app.processEvents()
+        
+        # Verify timer was stopped and no timeout error
+        mock_timer.stop.assert_called_once()
+        assert len(move_data) == 1
+        assert len(error_data) == 0
+    
+    def test_overlapping_request_rejected(self, qt_app):
+        """Calling request_move while in BUSY state should emit INVALID_REQUEST."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Track error signal
+        error_data = []
+        adapter.move_failed.connect(
+            lambda code, msg: error_data.append((code, msg))
+        )
+        
+        # Setup - adapter is in BUSY state
+        adapter._state = EngineState.BUSY
+        adapter._process = Mock()
+        adapter._process.state.return_value = QProcess.ProcessState.Running
+        
+        # Try to make another request
+        fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        adapter.request_move(fen)
+        
+        # Process events
+        qt_app.processEvents()
+        
+        # Verify error
+        assert len(error_data) == 1
+        assert error_data[0][0] == EngineErrorCode.INVALID_REQUEST
+        assert "busy" in error_data[0][1].lower()
+    
+    def test_process_crash_during_move_request(self, qt_app):
+        """Process crash during move request should emit move_failed with PROCESS_CRASHED."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Track error signal
+        error_data = []
+        adapter.move_failed.connect(
+            lambda code, msg: error_data.append((code, msg))
+        )
+        
+        # Setup - adapter is in BUSY state
+        adapter._state = EngineState.BUSY
+        adapter._process = Mock()
+        adapter._process.state.return_value = QProcess.ProcessState.NotRunning
+        adapter._move_timeout_timer = Mock()
+        
+        # Simulate process crash
+        adapter._on_process_finished(1, QProcess.ExitStatus.CrashExit)
+        
+        # Process events
+        qt_app.processEvents()
+        
+        # Verify error signal and state
+        assert len(error_data) == 1
+        assert error_data[0][0] == EngineErrorCode.PROCESS_CRASHED
+        assert "crashed during move request" in error_data[0][1]
+        assert adapter.get_state() == EngineState.ERROR
+    
+    def test_partial_bestmove_line_buffering(self, qt_app):
+        """Partial bestmove line should be buffered correctly."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Track signal emission
+        move_data = []
+        adapter.move_ready.connect(lambda move: move_data.append(move))
+        
+        # Setup
+        adapter._state = EngineState.BUSY
+        adapter._process = Mock()
+        mock_timer = Mock()
+        adapter._move_timeout_timer = mock_timer
+        
+        # Simulate partial output followed by completion
+        adapter._output_buffer = "best"
+        
+        # Should not process yet (no newline)
+        assert len(move_data) == 0
+        
+        # Complete the line
+        adapter._output_buffer += "move e7e5\n"
+        
+        # Process the line
+        while '\n' in adapter._output_buffer:
+            line, adapter._output_buffer = adapter._output_buffer.split('\n', 1)
+            line = line.strip()
+            if line and adapter._state == EngineState.BUSY:
+                if line.startswith("bestmove "):
+                    tokens = line.split()
+                    if len(tokens) >= 2:
+                        adapter._process_bestmove_line(tokens[1])
+        
+        # Process events
+        qt_app.processEvents()
+        
+        # Now it should be processed
+        assert len(move_data) == 1
+        assert move_data[0] == "e7e5"
+    
+    def test_request_move_writes_correct_uci_commands(self, qt_app):
+        """request_move should write correct UCI position and go commands."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Setup - adapter is in READY state with mock process
+        adapter._state = EngineState.READY
+        mock_process = Mock()
+        mock_process.state.return_value = QProcess.ProcessState.Running
+        adapter._process = mock_process
+        
+        fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        adapter.request_move(fen, timeout_ms=1500)
+        
+        # Verify process.write() was called with correct commands
+        assert mock_process.write.call_count == 2
+        
+        # Check first call (position command)
+        first_call = mock_process.write.call_args_list[0][0][0]
+        assert first_call == f"position fen {fen}\n".encode('utf-8')
+        
+        # Check second call (go command)
+        second_call = mock_process.write.call_args_list[1][0][0]
+        assert second_call == b"go movetime 100\n"
+        
+        # Verify state transition
+        assert adapter.get_state() == EngineState.BUSY
+        assert adapter._pending_request_fen == fen
+        assert adapter._move_timeout_timer is not None
+    
+    def test_move_request_after_timeout_rejected(self, qt_app):
+        """After timeout, adapter should be in ERROR state and reject new requests."""
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        
+        # Track error signals
+        error_data = []
+        adapter.move_failed.connect(
+            lambda code, msg: error_data.append((code, msg))
+        )
+        
+        # Setup - simulate timeout occurred
+        adapter._state = EngineState.BUSY
+        adapter._process = Mock()
+        adapter._process.state.return_value = QProcess.ProcessState.Running
+        mock_timer = Mock()
+        mock_timer.interval.return_value = 1000
+        adapter._move_timeout_timer = mock_timer
+        
+        # Trigger timeout
+        adapter._on_move_timeout()
+        
+        # Clear error_data to track new error
+        error_data.clear()
+        
+        # Try to make a new request
+        fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        adapter.request_move(fen)
+        
+        # Process events
+        qt_app.processEvents()
+        
+        # Verify new request was rejected
+        assert adapter.get_state() == EngineState.ERROR
+        assert len(error_data) == 1
+        assert error_data[0][0] == EngineErrorCode.INVALID_REQUEST
 

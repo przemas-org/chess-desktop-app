@@ -530,6 +530,8 @@ class StockfishProcessAdapter(EngineAdapter):
         self._output_buffer = ""
         self._handshake_phase = ""  # Tracks: "" -> "uci_sent" -> "uci_ok" -> "isready_sent" -> "ready_ok"
         self._is_shutting_down = False
+        self._move_timeout_timer: Optional[QTimer] = None
+        self._pending_request_fen: Optional[str] = None
     
     def initialize(self) -> None:
         """
@@ -567,18 +569,19 @@ class StockfishProcessAdapter(EngineAdapter):
     
     def request_move(self, fen: str, timeout_ms: int = 1000) -> None:
         """
-        Request a move for the given position (STUBBED).
+        Request a move for the given position.
         
-        This is a stub implementation that validates state and immediately
-        returns a placeholder response. Full UCI move request/response logic
-        will be implemented in a later task.
+        Sends 'position fen <FEN>' and 'go movetime 100' commands to Stockfish,
+        starts a timeout timer, and waits for the bestmove response.
         
         Args:
             fen: FEN string of the position (with Black to move in v1).
-            timeout_ms: Timeout for the move request (currently unused).
+            timeout_ms: Timeout in milliseconds for the engine response.
         
         State transitions:
-            READY → BUSY → READY (immediate)
+            READY → BUSY (immediately)
+            BUSY → READY (on successful bestmove response)
+            BUSY → ERROR (on timeout or crash)
             Other states: emits move_failed(INVALID_REQUEST)
         """
         # Validate state
@@ -589,13 +592,39 @@ class StockfishProcessAdapter(EngineAdapter):
             )
             return
         
+        # Check if process is available
+        if self._process is None or self._process.state() != QProcess.ProcessState.Running:
+            self._state = EngineState.ERROR
+            self.move_failed.emit(
+                EngineErrorCode.PROCESS_CRASHED,
+                "Stockfish process is not running"
+            )
+            return
+        
         # Transition to BUSY
         self._state = EngineState.BUSY
+        self._pending_request_fen = fen
         
-        # TODO: Implement full UCI move request/response logic
-        # For now, immediately return a stubbed response
-        self._state = EngineState.READY
-        self.move_ready.emit("e7e5")  # Placeholder move
+        # Send UCI commands
+        position_cmd = f"position fen {fen}\n"
+        go_cmd = "go movetime 100\n"
+        
+        try:
+            self._process.write(position_cmd.encode('utf-8'))
+            self._process.write(go_cmd.encode('utf-8'))
+        except Exception as e:
+            self._state = EngineState.ERROR
+            self.move_failed.emit(
+                EngineErrorCode.PROCESS_CRASHED,
+                f"Failed to write to Stockfish process: {e}"
+            )
+            return
+        
+        # Set up timeout timer
+        self._move_timeout_timer = QTimer()
+        self._move_timeout_timer.setSingleShot(True)
+        self._move_timeout_timer.timeout.connect(self._on_move_timeout)
+        self._move_timeout_timer.start(timeout_ms)
     
     def shutdown(self) -> None:
         """
@@ -613,6 +642,11 @@ class StockfishProcessAdapter(EngineAdapter):
         if self._handshake_timer is not None:
             self._handshake_timer.stop()
             self._handshake_timer = None
+        
+        # Stop move timeout timer if running
+        if self._move_timeout_timer is not None:
+            self._move_timeout_timer.stop()
+            self._move_timeout_timer = None
         
         # Terminate the process if it exists
         if self._process is not None:
@@ -688,10 +722,14 @@ class StockfishProcessAdapter(EngineAdapter):
             )
         # If process exits after being ready, it's a runtime crash
         elif self._state in (EngineState.READY, EngineState.BUSY):
+            # Save the state before cleanup modifies it
+            was_busy = (self._state == EngineState.BUSY)
+            
             self._cleanup_on_error()
             self._state = EngineState.ERROR
-            # Emit appropriate signal based on current state
-            if self._state == EngineState.BUSY:
+            
+            # Emit appropriate signal based on the saved state
+            if was_busy:
                 self.move_failed.emit(
                     EngineErrorCode.PROCESS_CRASHED,
                     f"Stockfish process crashed during move request (exit code: {exit_code})"
@@ -718,6 +756,20 @@ class StockfishProcessAdapter(EngineAdapter):
             # Handle UCI handshake responses
             if self._state == EngineState.INITIALIZING:
                 self._process_handshake_line(line)
+            
+            # Handle move responses
+            elif self._state == EngineState.BUSY:
+                # Ignore info lines (engine analysis output)
+                if line.startswith("info "):
+                    continue
+                
+                # Parse bestmove lines
+                if line.startswith("bestmove "):
+                    # Extract UCI move (first token after "bestmove")
+                    tokens = line.split()
+                    if len(tokens) >= 2:
+                        uci_move = tokens[1]
+                        self._process_bestmove_line(uci_move)
     
     def _process_handshake_line(self, line: str) -> None:
         """Process a single line during UCI handshake."""
@@ -739,6 +791,30 @@ class StockfishProcessAdapter(EngineAdapter):
             self._state = EngineState.READY
             self.initialized.emit()
     
+    def _process_bestmove_line(self, uci_move: str) -> None:
+        """
+        Process a bestmove response from the engine.
+        
+        Args:
+            uci_move: The UCI move string extracted from the bestmove line.
+        """
+        if self._is_shutting_down:
+            return
+        
+        # Stop and clear timeout timer
+        if self._move_timeout_timer is not None:
+            self._move_timeout_timer.stop()
+            self._move_timeout_timer = None
+        
+        # Clear pending request state
+        self._pending_request_fen = None
+        
+        # Transition to READY state
+        self._state = EngineState.READY
+        
+        # Emit the move result
+        self.move_ready.emit(uci_move)
+    
     def _on_handshake_timeout(self) -> None:
         """Handle handshake timeout - transition to ERROR state."""
         if self._is_shutting_down:
@@ -751,6 +827,34 @@ class StockfishProcessAdapter(EngineAdapter):
                 EngineErrorCode.TIMEOUT,
                 f"UCI handshake timed out after {self.HANDSHAKE_TIMEOUT_MS}ms"
             )
+    
+    def _on_move_timeout(self) -> None:
+        """Handle move request timeout - transition to ERROR state."""
+        if self._is_shutting_down:
+            return
+        
+        if self._state != EngineState.BUSY:
+            return
+        
+        # Store timeout value for error message before clearing
+        timeout_ms = self._move_timeout_timer.interval() if self._move_timeout_timer else 1000
+        
+        # Stop timer and clear request state
+        if self._move_timeout_timer is not None:
+            self._move_timeout_timer.stop()
+            self._move_timeout_timer = None
+        
+        self._pending_request_fen = None
+        
+        # Clean up and transition to ERROR (terminal state)
+        self._cleanup_on_error()
+        self._state = EngineState.ERROR
+        
+        # Emit failure signal
+        self.move_failed.emit(
+            EngineErrorCode.TIMEOUT,
+            f"Engine did not respond within {timeout_ms}ms"
+        )
     
     def _cleanup_on_error(self) -> None:
         """Clean up resources on error (without emitting signals)."""
