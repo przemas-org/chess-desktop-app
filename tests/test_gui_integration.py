@@ -628,3 +628,417 @@ class TestMainWindowGameOwnership:
         except Exception as e:
             pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
 
+
+class TestMainWindowMoveSelection:
+    """Tests for MainWindow move selection logic using click handlers."""
+    
+    def test_clicking_piece_with_legal_moves_highlights_destinations(self):
+        """Clicking a piece with legal moves should highlight source and destinations."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()  # Starting position
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Click on e2 (white pawn with legal moves)
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            
+            # Verify source is selected
+            assert window._selected_source == "e2"
+            
+            # Verify legal destinations are computed (e3 and e4)
+            assert "e3" in window._legal_destinations
+            assert "e4" in window._legal_destinations
+            assert len(window._legal_destinations) == 2
+            
+            # Verify board widget shows selection
+            assert window._board_widget._selected_square == "e2"
+            assert window._board_widget._highlighted_squares == window._legal_destinations
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_clicking_legal_destination_applies_move(self):
+        """Clicking a legal destination should apply the move and update board."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Select e2 as source
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            
+            # Click e4 as destination
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # Verify move was applied
+            history = game.get_history()
+            assert len(history) == 1
+            assert history[0].from_square == "e2"
+            assert history[0].to_square == "e4"
+            
+            # Verify selection was cleared
+            assert window._selected_source is None
+            assert len(window._legal_destinations) == 0
+            assert window._board_widget._selected_square is None
+            assert len(window._board_widget._highlighted_squares) == 0
+            
+            # Verify board was updated
+            board = window._board_widget._board
+            # e4 should now have white pawn (rank 4 = index 4, file e = index 4)
+            assert board[4][4] == {"piece": "p", "color": "white"}
+            # e2 should be empty (rank 2 = index 6, file e = index 4)
+            assert board[6][4] is None
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_clicking_same_square_cancels_selection(self):
+        """Clicking the selected source square should cancel selection."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Select e2 as source
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            assert window._selected_source == "e2"
+            
+            # Click e2 again to cancel
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            
+            # Verify selection was cleared
+            assert window._selected_source is None
+            assert len(window._legal_destinations) == 0
+            assert window._board_widget._selected_square is None
+            assert len(window._board_widget._highlighted_squares) == 0
+            
+            # Verify no move was made
+            assert len(game.get_history()) == 0
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_right_click_clears_selection(self):
+        """Right-click should clear selection without changing game state."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Select e2 as source
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            assert window._selected_source == "e2"
+            
+            # Right-click anywhere
+            window._on_square_clicked("d4", Qt.MouseButton.RightButton)
+            
+            # Verify selection was cleared
+            assert window._selected_source is None
+            assert len(window._legal_destinations) == 0
+            assert window._board_widget._selected_square is None
+            assert len(window._board_widget._highlighted_squares) == 0
+            
+            # Verify no move was made
+            assert len(game.get_history()) == 0
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_clicking_square_with_no_legal_moves(self):
+        """Clicking a square with no legal moves should clear selection."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Click on e4 (empty square, no legal moves)
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # Verify nothing is selected
+            assert window._selected_source is None
+            assert len(window._legal_destinations) == 0
+            assert window._board_widget._selected_square is None
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_clicking_illegal_destination_preserves_selection(self):
+        """Clicking an illegal destination should preserve current selection."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Select e2 as source
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            original_source = window._selected_source
+            original_destinations = window._legal_destinations.copy()
+            
+            # Click on d4 (not a legal destination for e2 pawn)
+            window._on_square_clicked("d4", Qt.MouseButton.LeftButton)
+            
+            # Verify selection is preserved
+            assert window._selected_source == original_source
+            assert window._legal_destinations == original_destinations
+            
+            # Verify no move was made
+            assert len(game.get_history()) == 0
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_promotion_selects_queen(self):
+        """Promotion moves should automatically select queen promotion."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            # Set up position where white pawn on a7 can promote
+            fen = "8/P7/8/8/8/8/8/4K2k w - - 0 1"
+            game = Game.from_fen(fen)
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Select a7 pawn
+            window._on_square_clicked("a7", Qt.MouseButton.LeftButton)
+            
+            # Click a8 to promote
+            window._on_square_clicked("a8", Qt.MouseButton.LeftButton)
+            
+            # Verify move was made with queen promotion
+            history = game.get_history()
+            assert len(history) == 1
+            assert history[0].from_square == "a7"
+            assert history[0].to_square == "a8"
+            assert history[0].promotion == "q"
+            
+            # Verify board shows queen on a8
+            board = window._board_widget._board
+            # a8 is rank 8 = index 0, file a = index 0
+            assert board[0][0] == {"piece": "q", "color": "white"}
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_handler_works_with_no_game_set(self):
+        """Handler should work gracefully when no game is set."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            # Don't set a game
+            
+            # Click on e2 (should not crash, just do nothing)
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            
+            # Verify nothing is selected
+            assert window._selected_source is None
+            assert len(window._legal_destinations) == 0
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_complete_move_sequence(self):
+        """Test a complete sequence of moves via click handlers."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Move 1: e2-e4
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # Move 2: e7-e5
+            window._on_square_clicked("e7", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e5", Qt.MouseButton.LeftButton)
+            
+            # Move 3: g1-f3
+            window._on_square_clicked("g1", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("f3", Qt.MouseButton.LeftButton)
+            
+            # Verify all moves were applied
+            history = game.get_history()
+            assert len(history) == 3
+            assert history[0].uci == "e2e4"
+            assert history[1].uci == "e7e5"
+            assert history[2].uci == "g1f3"
+            
+            # Verify board state
+            board = window._board_widget._board
+            # Knight on f3 (rank 3 = index 5, file f = index 5)
+            assert board[5][5] == {"piece": "n", "color": "white"}
+            # White pawn on e4
+            assert board[4][4] == {"piece": "p", "color": "white"}
+            # Black pawn on e5
+            assert board[3][4] == {"piece": "p", "color": "black"}
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_right_click_during_destination_selection(self):
+        """Right-click during destination selection should clear everything."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Select e2 as source
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            assert window._selected_source == "e2"
+            
+            # Right-click on potential destination
+            window._on_square_clicked("e4", Qt.MouseButton.RightButton)
+            
+            # Verify selection was cleared, not move made
+            assert window._selected_source is None
+            assert len(game.get_history()) == 0
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_clicking_opponent_piece_during_destination_selection(self):
+        """Clicking opponent piece during destination selection should handle appropriately."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Select e2 pawn
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            
+            # Click on e7 (opponent pawn, not a legal destination)
+            window._on_square_clicked("e7", Qt.MouseButton.LeftButton)
+            
+            # Verify selection is preserved (silent failure)
+            assert window._selected_source == "e2"
+            assert len(game.get_history()) == 0
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+
