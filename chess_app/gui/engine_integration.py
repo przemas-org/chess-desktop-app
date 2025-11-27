@@ -13,7 +13,7 @@ must have Black to move.
 from abc import ABCMeta, abstractmethod
 from enum import Enum
 from typing import Optional
-from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtCore import QObject, Signal, QTimer, QProcess
 
 
 class QABCMeta(type(QObject), ABCMeta):
@@ -477,4 +477,290 @@ class FakeEngineAdapter(EngineAdapter):
         # Clean up timer
         if timer in self._pending_timers:
             self._pending_timers.remove(timer)
+
+
+class StockfishProcessAdapter(EngineAdapter):
+    """
+    Concrete implementation of EngineAdapter using Stockfish via QProcess.
+    
+    This adapter manages a long-lived Stockfish process, handling UCI protocol
+    communication, lifecycle management, and error handling. The process is
+    spawned on initialization and kept alive for the duration of the session.
+    
+    The adapter performs a UCI handshake on initialization:
+    1. Start the Stockfish process
+    2. Send "uci" command
+    3. Wait for "uciok" response
+    4. Send "isready" command
+    5. Wait for "readyok" response
+    6. Transition to READY state
+    
+    All process communication is non-blocking and event-driven via Qt signals.
+    A timeout of 5000ms is enforced for the handshake phase. If the handshake
+    fails or times out, the adapter transitions to ERROR state permanently.
+    
+    Args:
+        stockfish_path: Path to the Stockfish binary executable.
+    
+    Example:
+        adapter = StockfishProcessAdapter("/usr/bin/stockfish")
+        adapter.initialized.connect(on_ready)
+        adapter.initialization_failed.connect(on_error)
+        adapter.initialize()
+    
+    Note:
+        This implementation currently stubs out move request logic. Full UCI
+        move request/response handling will be implemented in a later task.
+    """
+    
+    # Handshake timeout in milliseconds
+    HANDSHAKE_TIMEOUT_MS = 5000
+    
+    def __init__(self, stockfish_path: str):
+        """
+        Initialize the adapter with the path to Stockfish binary.
+        
+        Args:
+            stockfish_path: Path to the Stockfish executable.
+        """
+        super().__init__()
+        self._stockfish_path = stockfish_path
+        self._process: Optional[QProcess] = None
+        self._handshake_timer: Optional[QTimer] = None
+        self._output_buffer = ""
+        self._handshake_phase = ""  # Tracks: "" -> "uci_sent" -> "uci_ok" -> "isready_sent" -> "ready_ok"
+        self._is_shutting_down = False
+    
+    def initialize(self) -> None:
+        """
+        Start the Stockfish process and perform UCI handshake.
+        
+        State transitions:
+            DISABLED → INITIALIZING (immediately)
+            INITIALIZING → READY (on successful handshake)
+            INITIALIZING → ERROR (on failure or timeout)
+        
+        The method returns immediately. Success/failure is communicated via
+        the initialized() or initialization_failed() signals.
+        """
+        # Transition to INITIALIZING state
+        self._state = EngineState.INITIALIZING
+        self._is_shutting_down = False
+        
+        # Create and configure QProcess
+        self._process = QProcess()
+        
+        # Connect process signals
+        self._process.started.connect(self._on_process_started)
+        self._process.errorOccurred.connect(self._on_process_error)
+        self._process.finished.connect(self._on_process_finished)
+        self._process.readyReadStandardOutput.connect(self._on_stdout_ready)
+        
+        # Set up handshake timeout
+        self._handshake_timer = QTimer()
+        self._handshake_timer.setSingleShot(True)
+        self._handshake_timer.timeout.connect(self._on_handshake_timeout)
+        self._handshake_timer.start(self.HANDSHAKE_TIMEOUT_MS)
+        
+        # Start the Stockfish process
+        self._process.start(self._stockfish_path, [])
+    
+    def request_move(self, fen: str, timeout_ms: int = 1000) -> None:
+        """
+        Request a move for the given position (STUBBED).
+        
+        This is a stub implementation that validates state and immediately
+        returns a placeholder response. Full UCI move request/response logic
+        will be implemented in a later task.
+        
+        Args:
+            fen: FEN string of the position (with Black to move in v1).
+            timeout_ms: Timeout for the move request (currently unused).
+        
+        State transitions:
+            READY → BUSY → READY (immediate)
+            Other states: emits move_failed(INVALID_REQUEST)
+        """
+        # Validate state
+        if self._state != EngineState.READY:
+            self.move_failed.emit(
+                EngineErrorCode.INVALID_REQUEST,
+                f"Cannot request move in state {self._state.value}"
+            )
+            return
+        
+        # Transition to BUSY
+        self._state = EngineState.BUSY
+        
+        # TODO: Implement full UCI move request/response logic
+        # For now, immediately return a stubbed response
+        self._state = EngineState.READY
+        self.move_ready.emit("e7e5")  # Placeholder move
+    
+    def shutdown(self) -> None:
+        """
+        Cleanly shut down the Stockfish process.
+        
+        This method is safe to call in any state and can be called multiple times.
+        It attempts to gracefully terminate the process by sending "quit" command,
+        then waits briefly before forcing termination if needed.
+        
+        No signals are emitted after shutdown begins.
+        """
+        self._is_shutting_down = True
+        
+        # Stop handshake timer if running
+        if self._handshake_timer is not None:
+            self._handshake_timer.stop()
+            self._handshake_timer = None
+        
+        # Terminate the process if it exists
+        if self._process is not None:
+            # Try graceful shutdown with "quit" command
+            if self._process.state() == QProcess.ProcessState.Running:
+                try:
+                    self._process.write(b"quit\n")
+                    self._process.waitForFinished(1000)  # Wait 1 second
+                except Exception:
+                    pass  # Ignore errors during shutdown
+            
+            # Force kill if still running
+            if self._process.state() == QProcess.ProcessState.Running:
+                self._process.kill()
+                self._process.waitForFinished(1000)
+            
+            # Disconnect all signals to prevent any further emissions
+            try:
+                self._process.started.disconnect()
+                self._process.errorOccurred.disconnect()
+                self._process.finished.disconnect()
+                self._process.readyReadStandardOutput.disconnect()
+            except Exception:
+                pass  # Ignore errors if already disconnected
+            
+            self._process = None
+    
+    def _on_process_started(self) -> None:
+        """Handle successful process startup - send initial UCI command."""
+        if self._is_shutting_down:
+            return
+        
+        # Send "uci" command to initiate handshake
+        self._handshake_phase = "uci_sent"
+        self._process.write(b"uci\n")
+    
+    def _on_process_error(self, error) -> None:
+        """Handle process startup or runtime errors."""
+        if self._is_shutting_down:
+            return
+        
+        # Map QProcess error to message
+        error_messages = {
+            QProcess.ProcessError.FailedToStart: "Failed to start Stockfish process. Check that the binary exists and is executable.",
+            QProcess.ProcessError.Crashed: "Stockfish process crashed unexpectedly.",
+            QProcess.ProcessError.Timedout: "Stockfish process timed out.",
+            QProcess.ProcessError.WriteError: "Failed to write to Stockfish process.",
+            QProcess.ProcessError.ReadError: "Failed to read from Stockfish process.",
+            QProcess.ProcessError.UnknownError: "Unknown error occurred with Stockfish process.",
+        }
+        
+        error_msg = error_messages.get(error, f"Stockfish process error: {error}")
+        
+        # Clean up
+        self._cleanup_on_error()
+        
+        # Transition to ERROR state and emit failure signal
+        self._state = EngineState.ERROR
+        self.initialization_failed.emit(EngineErrorCode.INITIALIZATION_FAILED, error_msg)
+    
+    def _on_process_finished(self, exit_code: int, exit_status) -> None:
+        """Handle unexpected process termination."""
+        if self._is_shutting_down:
+            return
+        
+        # If process exits during initialization, it's an initialization failure
+        if self._state == EngineState.INITIALIZING:
+            self._cleanup_on_error()
+            self._state = EngineState.ERROR
+            self.initialization_failed.emit(
+                EngineErrorCode.PROCESS_CRASHED,
+                f"Stockfish process terminated unexpectedly during initialization (exit code: {exit_code})"
+            )
+        # If process exits after being ready, it's a runtime crash
+        elif self._state in (EngineState.READY, EngineState.BUSY):
+            self._cleanup_on_error()
+            self._state = EngineState.ERROR
+            # Emit appropriate signal based on current state
+            if self._state == EngineState.BUSY:
+                self.move_failed.emit(
+                    EngineErrorCode.PROCESS_CRASHED,
+                    f"Stockfish process crashed during move request (exit code: {exit_code})"
+                )
+    
+    def _on_stdout_ready(self) -> None:
+        """Handle data available on stdout - accumulate and parse UCI responses."""
+        if self._is_shutting_down or self._process is None:
+            return
+        
+        # Read all available data
+        data = self._process.readAllStandardOutput()
+        text = bytes(data).decode('utf-8', errors='replace')
+        self._output_buffer += text
+        
+        # Process complete lines
+        while '\n' in self._output_buffer:
+            line, self._output_buffer = self._output_buffer.split('\n', 1)
+            line = line.strip()
+            
+            if not line:
+                continue
+            
+            # Handle UCI handshake responses
+            if self._state == EngineState.INITIALIZING:
+                self._process_handshake_line(line)
+    
+    def _process_handshake_line(self, line: str) -> None:
+        """Process a single line during UCI handshake."""
+        if self._handshake_phase == "uci_sent" and line == "uciok":
+            # Received uciok, send isready
+            self._handshake_phase = "uci_ok"
+            self._process.write(b"isready\n")
+        
+        elif self._handshake_phase == "uci_ok" and line == "readyok":
+            # Handshake complete!
+            self._handshake_phase = "ready_ok"
+            
+            # Stop timeout timer
+            if self._handshake_timer is not None:
+                self._handshake_timer.stop()
+                self._handshake_timer = None
+            
+            # Transition to READY and emit success signal
+            self._state = EngineState.READY
+            self.initialized.emit()
+    
+    def _on_handshake_timeout(self) -> None:
+        """Handle handshake timeout - transition to ERROR state."""
+        if self._is_shutting_down:
+            return
+        
+        if self._state == EngineState.INITIALIZING:
+            self._cleanup_on_error()
+            self._state = EngineState.ERROR
+            self.initialization_failed.emit(
+                EngineErrorCode.TIMEOUT,
+                f"UCI handshake timed out after {self.HANDSHAKE_TIMEOUT_MS}ms"
+            )
+    
+    def _cleanup_on_error(self) -> None:
+        """Clean up resources on error (without emitting signals)."""
+        # Stop handshake timer
+        if self._handshake_timer is not None:
+            self._handshake_timer.stop()
+            self._handshake_timer = None
+        
+        # Terminate process
+        if self._process is not None and self._process.state() == QProcess.ProcessState.Running:
+            self._process.kill()
+            self._process.waitForFinished(1000)
 
