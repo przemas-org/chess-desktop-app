@@ -23,14 +23,12 @@ def main():
     # Create a new game with standard starting position
     game = Game()
     
-    # Get the starting FEN from the game model
-    starting_fen = game.export_fen()
-    
     # Create the main window
     window = MainWindow()
     
-    # Set the board position using FEN
-    window.set_board_fen(starting_fen)
+    # Wire the game into the window and initialize the board display
+    window.set_game(game)
+    window.update_board_from_game()
     
     # Show the window
     window.show()

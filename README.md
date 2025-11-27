@@ -229,17 +229,20 @@ widget.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
 
 #### MainWindow Integration
 
-The `MainWindow` class integrates `BoardWidget` as its central widget and provides a FEN-based API:
+The `MainWindow` class integrates `BoardWidget` as its central widget and owns a `Game` instance as the single source of truth for the board state:
 
 ```python
+from chess_app.game import Game
 from chess_app.gui import MainWindow
 
 window = MainWindow()
-window.set_board_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+game = Game()  # Standard starting position
+window.set_game(game)
+window.update_board_from_game()
 window.show()
 ```
 
-Communication between `Game` model and GUI is via FEN strings only.
+The `MainWindow` coordinates between the `Game` model and the `BoardWidget` view, with all board updates flowing through `update_board_from_game()`.
 
 #### GUI Entry Point
 
@@ -253,7 +256,8 @@ from chess_app.gui import MainWindow
 app = QApplication([])
 game = Game()
 window = MainWindow()
-window.set_board_fen(game.export_fen())
+window.set_game(game)
+window.update_board_from_game()
 window.show()
 app.exec()
 ```
