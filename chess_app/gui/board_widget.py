@@ -4,10 +4,10 @@ This module provides a dedicated widget for rendering a chessboard
 based on FEN (Forsyth-Edwards Notation) strings.
 """
 
-from typing import Optional
+from typing import Optional, Collection
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QRect, QSize
-from PySide6.QtGui import QPaintEvent, QPainter, QColor, QFont
+from PySide6.QtCore import Qt, QRect, QSize, Signal
+from PySide6.QtGui import QPaintEvent, QPainter, QColor, QFont, QMouseEvent
 
 
 # Unicode chess piece glyphs mapping
@@ -45,12 +45,22 @@ class BoardWidget(QWidget):
     The widget does not depend on Game or python-chess types and operates
     purely at the GUI layer.
     
+    Signals:
+        square_clicked: Emitted when a square is clicked. Parameters are:
+                       - square (str): Algebraic notation (e.g., "e4")
+                       - button (Qt.MouseButton): The mouse button used
+    
     Attributes:
         _fen: The current full FEN string.
         _board: An 8×8 list structure where each element is either None (empty)
                 or a dict with "piece" and "color" keys. Board orientation is
                 fixed with white at the bottom (rank 1 at index 7, rank 8 at index 0).
+        _selected_square: The currently selected square in algebraic notation, or None.
+        _highlighted_squares: Set of squares to highlight in algebraic notation.
     """
+    
+    # Qt signal: emitted when a square is clicked
+    square_clicked = Signal(str, Qt.MouseButton)
     
     def __init__(self):
         """Initialize the BoardWidget with an empty 8×8 board."""
@@ -61,6 +71,10 @@ class BoardWidget(QWidget):
         self._board: list[list[Optional[dict]]] = [
             [None for _ in range(8)] for _ in range(8)
         ]
+        
+        # Mouse interaction and highlighting state
+        self._selected_square: Optional[str] = None
+        self._highlighted_squares: set[str] = set()
     
     def sizeHint(self) -> QSize:
         """Provide a size hint for the widget.
@@ -148,6 +162,39 @@ class BoardWidget(QWidget):
         # Trigger repaint
         self.update()
     
+    def set_selected_square(self, square: Optional[str]) -> None:
+        """Set the currently selected square for visual highlighting.
+        
+        Updates the internal selected square state and triggers a repaint
+        to show the selection overlay. Pass None to clear the selection.
+        
+        Args:
+            square: Algebraic square notation (e.g., "e4") or None to clear.
+        
+        Example:
+            widget.set_selected_square("e2")  # Highlight e2
+            widget.set_selected_square(None)  # Clear selection
+        """
+        self._selected_square = square
+        self.update()
+    
+    def set_highlighted_squares(self, squares: Collection[str]) -> None:
+        """Set the squares to highlight as potential move destinations.
+        
+        Updates the internal highlighted squares state and triggers a repaint
+        to show the highlight overlays. Pass an empty collection to clear
+        all highlights.
+        
+        Args:
+            squares: Collection of algebraic square notations (e.g., ["e4", "e3"]).
+        
+        Example:
+            widget.set_highlighted_squares(["e4", "e3", "d3"])
+            widget.set_highlighted_squares([])  # Clear highlights
+        """
+        self._highlighted_squares = set(squares)
+        self.update()
+    
     def _calculate_layout(self, width: int, height: int) -> tuple[int, int, int]:
         """Calculate board layout parameters for the given widget dimensions.
         
@@ -184,6 +231,119 @@ class BoardWidget(QWidget):
         y_margin = (height - board_height) // 2
         
         return square_size, x_margin, y_margin
+    
+    def _pixel_to_square(self, x: int, y: int) -> Optional[str]:
+        """Convert pixel coordinates to algebraic square notation.
+        
+        Maps a click position (in widget coordinates) to a chess square
+        in algebraic notation (e.g., "e4"). Returns None if the coordinates
+        are outside the board area.
+        
+        Args:
+            x: X-coordinate in widget pixels.
+            y: Y-coordinate in widget pixels.
+        
+        Returns:
+            Algebraic square notation (e.g., "a1", "h8") if within the board,
+            None if outside the board area.
+        
+        Example:
+            # Click in bottom-left square
+            square = widget._pixel_to_square(10, 470)  # Returns "a1"
+            
+            # Click outside board
+            square = widget._pixel_to_square(500, 500)  # Returns None
+        """
+        # Get current layout
+        width = self.width()
+        height = self.height()
+        square_size, x_margin, y_margin = self._calculate_layout(width, height)
+        
+        # Adjust coordinates relative to board origin
+        board_x = x - x_margin
+        board_y = y - y_margin
+        
+        # Check if click is outside the board area
+        board_size = square_size * 8
+        if board_x < 0 or board_x >= board_size or board_y < 0 or board_y >= board_size:
+            return None
+        
+        # Convert to file/rank indices (0-7)
+        file_idx = board_x // square_size
+        rank_idx = board_y // square_size
+        
+        # Ensure indices are in valid range (defensive check)
+        if not (0 <= file_idx < 8 and 0 <= rank_idx < 8):
+            return None
+        
+        # Convert to algebraic notation
+        # File: 0-7 → 'a'-'h'
+        file_char = chr(ord('a') + file_idx)
+        
+        # Rank: board index 0-7 → chess rank '8'-'1'
+        # (board index 0 = rank 8, board index 7 = rank 1)
+        rank_char = str(8 - rank_idx)
+        
+        return file_char + rank_char
+    
+    def _square_to_rect(self, square: str, square_size: int, x_margin: int, y_margin: int) -> Optional[QRect]:
+        """Convert algebraic square notation to pixel rectangle.
+        
+        Maps a chess square in algebraic notation to its pixel rectangle
+        for rendering. Returns None if the square notation is invalid.
+        
+        Args:
+            square: Algebraic square notation (e.g., "e4").
+            square_size: Size of each square in pixels.
+            x_margin: Horizontal offset to board origin.
+            y_margin: Vertical offset to board origin.
+        
+        Returns:
+            QRect representing the square's pixel bounds, or None if invalid.
+        """
+        if len(square) != 2:
+            return None
+        
+        file_char = square[0]
+        rank_char = square[1]
+        
+        # Validate and convert file ('a'-'h' → 0-7)
+        if not ('a' <= file_char <= 'h'):
+            return None
+        file_idx = ord(file_char) - ord('a')
+        
+        # Validate and convert rank ('1'-'8' → board index 7-0)
+        if not ('1' <= rank_char <= '8'):
+            return None
+        rank_number = int(rank_char)
+        rank_idx = 8 - rank_number  # rank 8 → index 0, rank 1 → index 7
+        
+        # Calculate pixel position
+        x = x_margin + file_idx * square_size
+        y = y_margin + rank_idx * square_size
+        
+        return QRect(x, y, square_size, square_size)
+    
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Handle mouse press events to detect square clicks.
+        
+        Converts the click position to a chess square and emits the
+        square_clicked signal with the square name and button used.
+        Ignores clicks outside the board area.
+        
+        Args:
+            event: The mouse press event containing position and button information.
+        """
+        # Get click position
+        x = event.position().x()
+        y = event.position().y()
+        
+        # Convert to square notation
+        square = self._pixel_to_square(int(x), int(y))
+        
+        # Emit signal if click was on a valid square
+        if square is not None:
+            self.square_clicked.emit(square, event.button())
     
     def paintEvent(self, event: QPaintEvent) -> None:
         """Paint the chessboard with pieces using Unicode glyphs.
@@ -241,6 +401,24 @@ class BoardWidget(QWidget):
                 
                 # Draw the square
                 painter.fillRect(x, y, square_size, square_size, color)
+        
+        # Draw selection and highlight overlays
+        # These are drawn after the board but before pieces for proper layering
+        
+        # Draw highlighted destination squares (semi-transparent blue/cyan)
+        if self._highlighted_squares:
+            highlight_color = QColor(0, 150, 255, 80)
+            for square in self._highlighted_squares:
+                rect = self._square_to_rect(square, square_size, x_margin, y_margin)
+                if rect is not None:
+                    painter.fillRect(rect, highlight_color)
+        
+        # Draw selected square overlay (semi-transparent yellow)
+        if self._selected_square is not None:
+            selection_color = QColor(255, 255, 0, 100)
+            rect = self._square_to_rect(self._selected_square, square_size, x_margin, y_margin)
+            if rect is not None:
+                painter.fillRect(rect, selection_color)
         
         # Set up font for piece rendering (60% of square size)
         font = QFont("DejaVu Serif")
