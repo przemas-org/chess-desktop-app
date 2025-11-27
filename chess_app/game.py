@@ -526,6 +526,69 @@ class Game:
         """
         return Side.WHITE if self._board.turn else Side.BLACK
     
+    def get_piece_side(self, square: str) -> Optional[Side]:
+        """
+        Get which side (color) occupies a given square.
+        
+        Queries the board to determine if a square contains a piece and, if so,
+        which side that piece belongs to. This helper allows the GUI layer to
+        enforce side locking and make engine decisions without parsing FEN or
+        duplicating chess logic.
+        
+        Args:
+            square: Algebraic square notation (e.g., "e4", "a1", "h8").
+                   Case-insensitive.
+        
+        Returns:
+            Side.WHITE if a white piece occupies the square.
+            Side.BLACK if a black piece occupies the square.
+            None if the square is empty or if the square notation is invalid.
+        
+        Note:
+            This method is read-only and does not mutate the game state.
+            It is cheap to call repeatedly as it only queries board state.
+            Invalid square strings (e.g., "z9", "invalid") return None gracefully
+            rather than raising an exception.
+        
+        Example:
+            game = Game()
+            # Starting position
+            assert game.get_piece_side("e2") == Side.WHITE  # White pawn
+            assert game.get_piece_side("e7") == Side.BLACK  # Black pawn
+            assert game.get_piece_side("e4") is None        # Empty square
+            
+            # After moving white pawn
+            game.apply_move("e2e4")
+            assert game.get_piece_side("e2") is None        # Now empty
+            assert game.get_piece_side("e4") == Side.WHITE  # Pawn moved here
+            
+            # Invalid squares return None
+            assert game.get_piece_side("z9") is None
+            assert game.get_piece_side("invalid") is None
+        """
+        try:
+            # Normalize to lowercase (chess.parse_square expects lowercase)
+            square_lower = square.lower()
+            
+            # Convert algebraic notation to python-chess square index
+            square_idx = chess.parse_square(square_lower)
+            
+            # Query the piece at this square
+            piece = self._board.piece_at(square_idx)
+            
+            # If no piece, return None
+            if piece is None:
+                return None
+            
+            # Return the side based on piece color
+            # python-chess uses True for White, False for Black
+            return Side.WHITE if piece.color else Side.BLACK
+            
+        except (ValueError, AttributeError):
+            # ValueError: invalid square string (e.g., "z9", "invalid")
+            # AttributeError: malformed input that can't be processed
+            return None
+    
     def get_fullmove_number(self) -> int:
         """
         Get the current full-move number.
