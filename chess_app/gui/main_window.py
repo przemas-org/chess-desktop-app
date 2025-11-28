@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from .board_widget import BoardWidget
 from .engine_controller import EngineController
 from .engine_integration import EngineAdapter
-from ..game import Game, IllegalMoveError
+from ..game import Game, IllegalMoveError, Side
 
 
 class MainWindow(QMainWindow):
@@ -186,6 +186,17 @@ class MainWindow(QMainWindow):
         # Guard: ensure game is set
         if self._game is None:
             return
+        
+        # Guard: block input while engine move is in flight
+        if self._engine_controller is not None and self._engine_controller.is_in_flight():
+            return
+        
+        # Guard: when engine is configured, only allow White pieces
+        if self._engine_controller is not None:
+            piece_side = self._game.get_piece_side(square)
+            if piece_side != Side.WHITE:
+                # Silently ignore - not a White piece
+                return
         
         try:
             # Get all legal moves in the current position
