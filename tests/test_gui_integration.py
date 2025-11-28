@@ -125,7 +125,7 @@ class TestGUIBootstrap:
             # 3. Create MainWindow
             window = MainWindow()
             assert window is not None
-            assert window.windowTitle() == "Chess Desktop App"
+            assert window.windowTitle() == "Chess Desktop App - Human vs Human"
             
             # 4. Set game and update board
             window.set_game(game)
@@ -624,6 +624,101 @@ class TestMainWindowGameOwnership:
             
             # c7 should be empty (rank 7 = index 1, file c = index 2)
             assert board[1][2] is None
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+
+
+class TestMainWindowEngineStatus:
+    """Tests for MainWindow engine status and title updates."""
+    
+    def test_initial_window_title_is_human_vs_human(self):
+        """MainWindow should initially show Human vs Human title."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Initial title should indicate Human vs Human mode
+            assert window.windowTitle() == "Chess Desktop App - Human vs Human"
+            assert window._engine_enabled is False
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_window_title_updates_when_engine_set(self):
+        """Window title should update to Engine Enabled when adapter is set."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from chess_app.gui.engine_integration import FakeEngineAdapter
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            
+            # Initially Human vs Human
+            assert window.windowTitle() == "Chess Desktop App - Human vs Human"
+            
+            # Set up engine
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Title should update
+            assert window.windowTitle() == "Chess Desktop App - Engine Enabled"
+            assert window._engine_enabled is True
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_window_title_updates_when_engine_disabled(self):
+        """Window title should revert when engine is disabled."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from chess_app.gui.engine_integration import FakeEngineAdapter
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            
+            # Set up engine
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            assert window.windowTitle() == "Chess Desktop App - Engine Enabled"
+            
+            # Disable engine
+            window._on_engine_disabled("Test reason")
+            
+            # Title should revert
+            assert window.windowTitle() == "Chess Desktop App - Human vs Human"
+            assert window._engine_enabled is False
             
         except Exception as e:
             pytest.skip(f"Qt initialization failed (likely headless environment): {e}")

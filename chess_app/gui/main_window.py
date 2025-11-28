@@ -26,9 +26,6 @@ class MainWindow(QMainWindow):
         """Initialize the main window with default properties."""
         super().__init__()
         
-        # Set window title
-        self.setWindowTitle("Chess Desktop App")
-        
         # Set default window size
         self.resize(800, 600)
         
@@ -46,6 +43,10 @@ class MainWindow(QMainWindow):
         # Engine components (optional, may be None if engine not available)
         self._engine_adapter: Optional[EngineAdapter] = None
         self._engine_controller: Optional[EngineController] = None
+        self._engine_enabled: bool = False
+        
+        # Set initial window title (no engine yet)
+        self._update_window_title()
         
         # Connect board widget signals
         self._board_widget.square_clicked.connect(self._on_square_clicked)
@@ -101,6 +102,10 @@ class MainWindow(QMainWindow):
         
         self._engine_adapter = adapter
         self._engine_controller = EngineController(self._game, adapter)
+        self._engine_enabled = True
+        
+        # Update window title to reflect engine availability
+        self._update_window_title()
         
         # Connect controller signals
         self._engine_controller.engine_move_applied.connect(
@@ -309,12 +314,29 @@ class MainWindow(QMainWindow):
         """Handle engine being permanently disabled.
         
         This is called when the engine controller disables the engine due to
-        repeated failures or errors. Currently just logs the reason silently.
-        Future versions may show a user notification.
+        repeated failures or errors. Updates the window title to reflect
+        that the engine is no longer available.
         
         Args:
             reason: Human-readable description of why engine was disabled.
         """
-        # For v1, silently disable. Could add UI notification in future.
-        pass
+        self._engine_enabled = False
+        self._update_window_title()
+    
+    def _update_window_title(self) -> None:
+        """Update the window title based on engine availability.
+        
+        Sets the window title to indicate whether engine features are enabled:
+        - "Chess Desktop App - Engine Enabled" when engine is available
+        - "Chess Desktop App - Human vs Human" when engine is not available
+        
+        This method is called:
+        - On initialization (before engine setup)
+        - After successful engine adapter setup
+        - When engine is disabled due to errors
+        """
+        if self._engine_enabled:
+            self.setWindowTitle("Chess Desktop App - Engine Enabled")
+        else:
+            self.setWindowTitle("Chess Desktop App - Human vs Human")
 
