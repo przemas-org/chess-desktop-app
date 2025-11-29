@@ -196,8 +196,8 @@ class MainWindow(QMainWindow):
         if self._engine_controller is not None and self._engine_controller.is_in_flight():
             return
         
-        # Guard: when engine is configured, only allow White pieces
-        if self._engine_controller is not None:
+        # Guard: when engine is configured AND enabled, only allow White pieces
+        if self._engine_controller is not None and self._engine_controller.is_enabled():
             piece_side = self._game.get_piece_side(square)
             if piece_side != Side.WHITE:
                 # Silently ignore - not a White piece

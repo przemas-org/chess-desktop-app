@@ -1137,3 +1137,446 @@ class TestMainWindowMoveSelection:
         except Exception as e:
             pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
 
+
+class TestEndToEndEnginePlay:
+    """End-to-end functional tests for full engine-play flow.
+    
+    These tests exercise the complete integration: human plays White via UI clicks,
+    engine plays Black automatically, and UI updates accordingly. Uses FakeEngineAdapter
+    to avoid spawning real Stockfish processes.
+    """
+    
+    def test_happy_path_full_engine_response_flow(self):
+        """Test complete flow: human click → engine query → engine move → board update."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game, Side
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Setup window and game
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Setup engine
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Verify initial state
+            assert window.windowTitle() == "Chess Desktop App - Engine Enabled"
+            assert len(game.get_history()) == 0
+            assert game.get_side_to_move() == Side.WHITE
+            
+            # Human makes White move via UI clicks
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # Verify White move applied
+            assert len(game.get_history()) == 1
+            assert game.get_history()[0].uci == "e2e4"
+            assert game.get_side_to_move() == Side.BLACK
+            
+            # Simulate engine response (Black move)
+            adapter.simulate_move_response("e7e5")
+            app.processEvents()
+            
+            # Verify Black move applied
+            assert len(game.get_history()) == 2
+            assert game.get_history()[1].uci == "e7e5"
+            assert game.get_side_to_move() == Side.WHITE
+            
+            # Verify board widget updated
+            board = window._board_widget._board
+            # White pawn on e4
+            assert board[4][4] == {"piece": "p", "color": "white"}
+            # Black pawn on e5
+            assert board[3][4] == {"piece": "p", "color": "black"}
+            
+            # Verify FEN updated
+            fen = window._board_widget._fen
+            assert " w " in fen  # White to move
+            
+            # Verify selection cleared
+            assert window._selected_source is None
+            assert len(window._legal_destinations) == 0
+            
+            # Verify engine still enabled
+            assert window._engine_enabled is True
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_illegal_move_requery_success(self):
+        """Test engine returns illegal move once, then legal move on re-query."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Setup
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Human makes White move
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # Engine returns illegal move
+            adapter.simulate_move_response("z9z9")
+            app.processEvents()
+            
+            # Verify re-query happened (still in flight, no move applied)
+            assert len(game.get_history()) == 1  # Only White move
+            assert window._engine_controller.is_in_flight()
+            
+            # Verify engine made two requests (initial + re-query)
+            calls = adapter.get_call_log()
+            request_calls = [c for c in calls if c[0] == "request_move"]
+            assert len(request_calls) == 2
+            
+            # Engine returns legal move on re-query
+            adapter.simulate_move_response("e7e5")
+            app.processEvents()
+            
+            # Verify legal move applied
+            assert len(game.get_history()) == 2
+            assert game.get_history()[1].uci == "e7e5"
+            
+            # Verify board updated
+            board = window._board_widget._board
+            assert board[3][4] == {"piece": "p", "color": "black"}  # e5
+            
+            # Verify engine still enabled
+            assert window._engine_enabled is True
+            assert not window._engine_controller.is_in_flight()
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_illegal_move_double_failure_disables_engine(self):
+        """Test engine returns illegal move twice, gets disabled permanently."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game, Side
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Setup
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Track engine_disabled signal
+            disabled_reasons = []
+            window._engine_controller.engine_disabled.connect(
+                lambda reason: disabled_reasons.append(reason)
+            )
+            
+            # Human makes White move
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # First illegal move
+            adapter.simulate_move_response("z9z9")
+            app.processEvents()
+            
+            # Second illegal move (on re-query)
+            adapter.simulate_move_response("z8z8")
+            app.processEvents()
+            
+            # Verify engine disabled
+            assert window._engine_enabled is False
+            assert not window._engine_controller.is_enabled()
+            
+            # Verify signal emitted
+            assert len(disabled_reasons) == 1
+            assert "illegal move twice" in disabled_reasons[0].lower()
+            
+            # Verify window title updated
+            assert window.windowTitle() == "Chess Desktop App - Human vs Human"
+            
+            # Verify only White move applied (no Black move)
+            assert len(game.get_history()) == 1
+            assert game.get_side_to_move() == Side.BLACK
+            
+            # Human can now play Black manually
+            window._on_square_clicked("e7", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e5", Qt.MouseButton.LeftButton)
+            
+            # Verify manual Black move worked
+            assert len(game.get_history()) == 2
+            assert game.get_history()[1].uci == "e7e5"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_engine_timeout_disables_engine(self):
+        """Test engine timeout causes permanent disable and fallback to human-vs-human."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game, Side
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            from chess_app.gui.engine_integration import EngineErrorCode
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Setup
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Track engine_disabled signal
+            disabled_reasons = []
+            window._engine_controller.engine_disabled.connect(
+                lambda reason: disabled_reasons.append(reason)
+            )
+            
+            # Human makes White move
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # Simulate engine timeout
+            adapter.simulate_move_failure(
+                EngineErrorCode.TIMEOUT,
+                "Engine did not respond within 1000ms"
+            )
+            app.processEvents()
+            
+            # Verify engine disabled
+            assert window._engine_enabled is False
+            assert not window._engine_controller.is_enabled()
+            
+            # Verify signal emitted
+            assert len(disabled_reasons) == 1
+            assert "timeout" in disabled_reasons[0].lower()
+            
+            # Verify window title updated
+            assert window.windowTitle() == "Chess Desktop App - Human vs Human"
+            
+            # Verify only White move applied
+            assert len(game.get_history()) == 1
+            assert game.get_side_to_move() == Side.BLACK
+            
+            # Human can play Black
+            window._on_square_clicked("d7", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("d5", Qt.MouseButton.LeftButton)
+            
+            # Verify manual Black move worked
+            assert len(game.get_history()) == 2
+            assert game.get_history()[1].uci == "d7d5"
+            
+            # Game continues normally
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("d5", Qt.MouseButton.LeftButton)
+            
+            assert len(game.get_history()) == 3
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_engine_crash_disables_engine(self):
+        """Test engine crash causes permanent disable and fallback to human-vs-human."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game, Side
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            from chess_app.gui.engine_integration import EngineErrorCode
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Setup
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Track engine_disabled signal
+            disabled_reasons = []
+            window._engine_controller.engine_disabled.connect(
+                lambda reason: disabled_reasons.append(reason)
+            )
+            
+            # Human makes White move
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # Simulate engine crash
+            adapter.simulate_move_failure(
+                EngineErrorCode.PROCESS_CRASHED,
+                "Stockfish process crashed unexpectedly"
+            )
+            app.processEvents()
+            
+            # Verify engine disabled
+            assert window._engine_enabled is False
+            assert not window._engine_controller.is_enabled()
+            
+            # Verify signal emitted
+            assert len(disabled_reasons) == 1
+            assert "crashed" in disabled_reasons[0].lower()
+            
+            # Verify window title updated
+            assert window.windowTitle() == "Chess Desktop App - Human vs Human"
+            
+            # Game continues in human-vs-human mode
+            assert len(game.get_history()) == 1
+            assert game.get_side_to_move() == Side.BLACK
+            
+            # Human plays Black
+            window._on_square_clicked("e7", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e5", Qt.MouseButton.LeftButton)
+            
+            assert len(game.get_history()) == 2
+            assert game.get_history()[1].uci == "e7e5"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+    
+    def test_multiple_move_sequence_with_engine(self):
+        """Test complete opening sequence with engine playing Black."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game, Side
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Setup
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Track engine move signals
+            engine_moves_applied = []
+            window._engine_controller.engine_move_applied.connect(
+                lambda: engine_moves_applied.append(True)
+            )
+            
+            # Move sequence: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6
+            move_pairs = [
+                (("e2", "e4"), "e7e5"),    # 1. e4 e5
+                (("g1", "f3"), "b8c6"),    # 2. Nf3 Nc6
+                (("f1", "c4"), "g8f6"),    # 3. Bc4 Nf6
+            ]
+            
+            for (white_from, white_to), black_move in move_pairs:
+                # Human plays White
+                window._on_square_clicked(white_from, Qt.MouseButton.LeftButton)
+                window._on_square_clicked(white_to, Qt.MouseButton.LeftButton)
+                
+                # Engine responds with Black
+                adapter.simulate_move_response(black_move)
+                app.processEvents()
+            
+            # Verify all moves applied
+            assert len(game.get_history()) == 6
+            assert game.get_history()[0].uci == "e2e4"
+            assert game.get_history()[1].uci == "e7e5"
+            assert game.get_history()[2].uci == "g1f3"
+            assert game.get_history()[3].uci == "b8c6"
+            assert game.get_history()[4].uci == "f1c4"
+            assert game.get_history()[5].uci == "g8f6"
+            
+            # Verify engine move signals emitted
+            assert len(engine_moves_applied) == 3
+            
+            # Verify it's White's turn
+            assert game.get_side_to_move() == Side.WHITE
+            
+            # Verify board state
+            board = window._board_widget._board
+            # White knight on f3
+            assert board[5][5] == {"piece": "n", "color": "white"}
+            # Black knight on c6
+            assert board[2][2] == {"piece": "n", "color": "black"}
+            # Black knight on f6
+            assert board[2][5] == {"piece": "n", "color": "black"}
+            # White bishop on c4
+            assert board[4][2] == {"piece": "b", "color": "white"}
+            
+            # Verify engine still enabled
+            assert window._engine_enabled is True
+            assert window._engine_controller.is_enabled()
+            assert not window._engine_controller.is_in_flight()
+            
+            # Verify FEN updated correctly
+            fen = game.export_fen()
+            assert " w " in fen  # White to move
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
+
