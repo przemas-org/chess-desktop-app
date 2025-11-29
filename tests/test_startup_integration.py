@@ -76,7 +76,7 @@ class TestStartupWithEngine:
             from PySide6.QtWidgets import QApplication
             from chess_app.game import Game
             from chess_app.gui import MainWindow
-            from chess_app.gui.engine_integration import FakeEngineAdapter
+            from tests.engine_fakes import FakeEngineAdapter
             
             app = QApplication.instance()
             if app is None:
@@ -116,7 +116,7 @@ class TestStartupWithEngine:
             from PySide6.QtWidgets import QApplication
             from chess_app.game import Game
             from chess_app.gui import MainWindow
-            from chess_app.gui.engine_integration import FakeEngineAdapter
+            from tests.engine_fakes import FakeEngineAdapter
             
             app = QApplication.instance()
             if app is None:
@@ -189,7 +189,7 @@ class TestStartupWithoutEngine:
             from PySide6.QtWidgets import QApplication
             from chess_app.game import Game
             from chess_app.gui import MainWindow
-            from chess_app.gui.engine_integration import FakeEngineAdapter, EngineErrorCode
+            from tests.engine_fakes import FakeEngineAdapter, EngineErrorCode
             
             app = QApplication.instance()
             if app is None:
@@ -275,7 +275,7 @@ class TestEngineFeatureGating:
             from PySide6.QtWidgets import QApplication
             from chess_app.game import Game
             from chess_app.gui import MainWindow
-            from chess_app.gui.engine_integration import FakeEngineAdapter
+            from tests.engine_fakes import FakeEngineAdapter
             
             app = QApplication.instance()
             if app is None:
@@ -315,7 +315,7 @@ class TestEngineFeatureGating:
             from PySide6.QtCore import Qt
             from chess_app.game import Game
             from chess_app.gui import MainWindow
-            from chess_app.gui.engine_integration import FakeEngineAdapter
+            from tests.engine_fakes import FakeEngineAdapter
             
             app = QApplication.instance()
             if app is None:
@@ -415,7 +415,7 @@ class TestEngineIntegrationFlow:
             from PySide6.QtCore import Qt
             from chess_app.game import Game
             from chess_app.gui import MainWindow
-            from chess_app.gui.engine_integration import FakeEngineAdapter
+            from tests.engine_fakes import FakeEngineAdapter
             
             app = QApplication.instance()
             if app is None:

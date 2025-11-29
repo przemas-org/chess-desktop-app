@@ -661,7 +661,7 @@ class TestMainWindowEngineStatus:
             from PySide6.QtWidgets import QApplication
             from chess_app.game import Game
             from chess_app.gui import MainWindow
-            from chess_app.gui.engine_integration import FakeEngineAdapter
+            from tests.engine_fakes import FakeEngineAdapter
             
             app = QApplication.instance()
             if app is None:
@@ -695,7 +695,7 @@ class TestMainWindowEngineStatus:
             from PySide6.QtWidgets import QApplication
             from chess_app.game import Game
             from chess_app.gui import MainWindow
-            from chess_app.gui.engine_integration import FakeEngineAdapter
+            from tests.engine_fakes import FakeEngineAdapter
             
             app = QApplication.instance()
             if app is None:

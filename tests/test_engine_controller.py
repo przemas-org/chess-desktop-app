@@ -11,10 +11,8 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from chess_app.game import Game, Side
-from chess_app.gui.engine_integration import (
-    EngineErrorCode,
-    FakeEngineAdapter,
-)
+from chess_app.gui.engine_integration import EngineErrorCode
+from tests.engine_fakes import FakeEngineAdapter
 from chess_app.gui.engine_controller import EngineController
 
 

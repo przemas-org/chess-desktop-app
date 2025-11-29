@@ -14,8 +14,8 @@ from chess_app.gui.engine_integration import (
     EngineState,
     EngineErrorCode,
     EngineAdapter,
-    FakeEngineAdapter,
 )
+from tests.engine_fakes import FakeEngineAdapter
 
 
 class TestEngineState:
