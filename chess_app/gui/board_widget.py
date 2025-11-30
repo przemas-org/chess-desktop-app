@@ -1,13 +1,16 @@
 """Board widget for chess GUI.
 
 This module provides a dedicated widget for rendering a chessboard
-based on FEN (Forsyth-Edwards Notation) strings.
+based on FEN (Forsyth-Edwards Notation) strings. Pieces are rendered
+using sprite images from a sprite sheet, with automatic fallback to
+Unicode glyphs if sprite loading fails.
 """
 
 from typing import Optional, Collection
+import os
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, QRect, QSize, Signal
-from PySide6.QtGui import QPaintEvent, QPainter, QColor, QFont, QMouseEvent
+from PySide6.QtGui import QPaintEvent, QPainter, QColor, QFont, QMouseEvent, QPixmap
 
 
 # Unicode chess piece glyphs mapping
@@ -62,8 +65,23 @@ class BoardWidget(QWidget):
     # Qt signal: emitted when a square is clicked
     square_clicked = Signal(str, Qt.MouseButton)
     
-    def __init__(self):
-        """Initialize the BoardWidget with an empty 8×8 board."""
+    def __init__(
+        self,
+        sprite_path: Optional[str] = None,
+        sprite_rows: int = 2,
+        sprite_cols: int = 6,
+        sprite_piece_order: Optional[list[str]] = None
+    ):
+        """Initialize the BoardWidget with an empty 8×8 board.
+        
+        Args:
+            sprite_path: Path to the sprite sheet image. If None, uses default path
+                        relative to this module. Set to empty string to disable sprites.
+            sprite_rows: Number of rows in the sprite sheet (default: 2).
+            sprite_cols: Number of columns in the sprite sheet (default: 6).
+            sprite_piece_order: Order of pieces in sprite sheet as list of piece codes.
+                               Default: ['k', 'q', 'b', 'n', 'r', 'p'] for each row.
+        """
         super().__init__()
         
         # Initialize with empty board (8×8 grid)
@@ -75,6 +93,134 @@ class BoardWidget(QWidget):
         # Mouse interaction and highlighting state
         self._selected_square: Optional[str] = None
         self._highlighted_squares: set[str] = set()
+        
+        # Sprite rendering state
+        self._piece_sprites: dict[tuple[str, str], QPixmap] = {}
+        self._sprites_available: bool = False
+        
+        # Load sprite sheet
+        if sprite_path != "":  # Empty string explicitly disables sprites
+            if sprite_path is None:
+                # Default path: relative to this module
+                module_dir = os.path.dirname(os.path.abspath(__file__))
+                sprite_path = os.path.join(module_dir, "assets", "chess-pieces.svg")
+            
+            if sprite_piece_order is None:
+                sprite_piece_order = ['k', 'q', 'b', 'n', 'r', 'p']
+            
+            self._load_sprites(sprite_path, sprite_rows, sprite_cols, sprite_piece_order)
+    
+    def _load_sprites(
+        self,
+        sprite_path: str,
+        sprite_rows: int,
+        sprite_cols: int,
+        sprite_piece_order: list[str]
+    ) -> None:
+        """Load and extract piece sprites from sprite sheet.
+        
+        Args:
+            sprite_path: Path to the sprite sheet image file.
+            sprite_rows: Number of rows in the sprite sheet.
+            sprite_cols: Number of columns in the sprite sheet.
+            sprite_piece_order: Order of pieces in each row.
+        """
+        try:
+            # Load the sprite sheet
+            sprite_sheet = QPixmap(sprite_path)
+            
+            # Check if loading was successful
+            if sprite_sheet.isNull():
+                print(f"Warning: Failed to load sprite sheet from {sprite_path}. "
+                      f"Falling back to Unicode glyphs.")
+                return
+            
+            # Extract individual piece sprites
+            self._piece_sprites = self._extract_piece_sprites(
+                sprite_sheet,
+                sprite_rows,
+                sprite_cols,
+                sprite_piece_order
+            )
+            
+            # Mark sprites as available if extraction was successful
+            if self._piece_sprites:
+                self._sprites_available = True
+                print(f"Successfully loaded {len(self._piece_sprites)} piece sprites from {sprite_path}")
+            else:
+                print(f"Warning: Failed to extract sprites from {sprite_path}. "
+                      f"Falling back to Unicode glyphs.")
+                
+        except Exception as e:
+            print(f"Warning: Error loading sprites from {sprite_path}: {e}. "
+                  f"Falling back to Unicode glyphs.")
+            self._sprites_available = False
+    
+    def _extract_piece_sprites(
+        self,
+        sprite_sheet: QPixmap,
+        rows: int,
+        cols: int,
+        piece_order: list[str]
+    ) -> dict[tuple[str, str], QPixmap]:
+        """Extract individual piece sprites from a sprite sheet.
+        
+        Args:
+            sprite_sheet: The loaded sprite sheet as a QPixmap.
+            rows: Number of rows in the sprite sheet (typically 2: white and black).
+            cols: Number of columns in the sprite sheet (number of piece types).
+            piece_order: List of piece codes in order (e.g., ['k', 'q', 'b', 'n', 'r', 'p']).
+        
+        Returns:
+            Dictionary mapping (piece_type, color) tuples to QPixmap objects.
+            Returns empty dict if extraction fails.
+        """
+        sprites = {}
+        
+        try:
+            # Get sprite sheet dimensions
+            sheet_width = sprite_sheet.width()
+            sheet_height = sprite_sheet.height()
+            
+            # Validate dimensions
+            if sheet_width <= 0 or sheet_height <= 0:
+                print("Warning: Invalid sprite sheet dimensions")
+                return {}
+            
+            # Calculate cell dimensions
+            cell_width = sheet_width // cols
+            cell_height = sheet_height // rows
+            
+            if cell_width <= 0 or cell_height <= 0:
+                print("Warning: Invalid cell dimensions in sprite sheet")
+                return {}
+            
+            # Extract sprites for each row (row 0 = white, row 1 = black)
+            colors = ['white', 'black']
+            
+            for row_idx in range(min(rows, len(colors))):
+                color = colors[row_idx]
+                
+                for col_idx in range(min(cols, len(piece_order))):
+                    piece_type = piece_order[col_idx]
+                    
+                    # Calculate sprite position in the sheet
+                    x = col_idx * cell_width
+                    y = row_idx * cell_height
+                    
+                    # Extract the sprite
+                    piece_sprite = sprite_sheet.copy(x, y, cell_width, cell_height)
+                    
+                    if not piece_sprite.isNull():
+                        sprites[(piece_type, color)] = piece_sprite
+                    else:
+                        print(f"Warning: Failed to extract sprite for {color} {piece_type}")
+            
+            return sprites
+            
+        except Exception as e:
+            print(f"Warning: Error extracting sprites: {e}")
+            return {}
     
     def sizeHint(self) -> QSize:
         """Provide a size hint for the widget.
@@ -346,18 +492,20 @@ class BoardWidget(QWidget):
             self.square_clicked.emit(square, event.button())
     
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Paint the chessboard with pieces using Unicode glyphs.
+        """Paint the chessboard with pieces using sprite images or Unicode glyphs.
         
         Renders an 8×8 chessboard with alternating light and dark squares,
-        and draws chess pieces as Unicode characters. The board is centered
-        within the widget with uniform margins.
+        and draws chess pieces using sprite images (if available) or Unicode
+        characters (fallback). The board is centered within the widget with
+        uniform margins.
         
         Layout:
         - Square size is computed as min(width, height) // 8
         - Board is centered with equal margins on all sides
         - Light squares: #F0D9B5 (classic beige)
         - Dark squares: #B58863 (classic brown)
-        - Pieces are rendered in "DejaVu Serif" font at 60% of square size
+        - Pieces (sprite mode): Scaled to 85% of square size with smooth transformation
+        - Pieces (glyph mode): Rendered in "DejaVu Serif" font at 60% of square size
         
         Board orientation:
         - Rank 8 (black pieces) at top (board index 0)
@@ -420,31 +568,62 @@ class BoardWidget(QWidget):
             if rect is not None:
                 painter.fillRect(rect, selection_color)
         
-        # Set up font for piece rendering (60% of square size)
-        font = QFont("DejaVu Serif")
-        font.setPixelSize(int(square_size * 0.6))
-        painter.setFont(font)
-        
-        # Draw pieces
-        for rank in range(8):
-            for file in range(8):
-                piece_data = self._board[rank][file]
-                
-                if piece_data is not None:
-                    # Get the Unicode glyph for this piece
-                    piece_key = (piece_data["piece"], piece_data["color"])
-                    glyph = PIECE_UNICODE.get(piece_key, "")
+        # Draw pieces using sprites or Unicode glyphs
+        if self._sprites_available:
+            # Enable smooth pixmap transformation for better quality
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            
+            # Calculate piece size (85% of square size for padding)
+            piece_size = int(square_size * 0.8)
+            piece_offset = (square_size - piece_size) // 2
+            
+            for rank in range(8):
+                for file in range(8):
+                    piece_data = self._board[rank][file]
                     
-                    if glyph:
-                        # Calculate square bounds
-                        x = x_margin + file * square_size
-                        y = y_margin + rank * square_size
-                        rect = QRect(x, y, square_size, square_size)
+                    if piece_data is not None:
+                        # Get the sprite for this piece
+                        piece_key = (piece_data["piece"], piece_data["color"])
+                        sprite = self._piece_sprites.get(piece_key)
                         
-                        # Draw the piece glyph centered in the square
-                        painter.drawText(
-                            rect,
-                            Qt.AlignmentFlag.AlignCenter,
-                            glyph
-                        )
+                        if sprite is not None:
+                            # Calculate piece position (centered with padding)
+                            x = x_margin + file * square_size + piece_offset
+                            y = y_margin + rank * square_size + piece_offset
+                            
+                            # Scale and draw the sprite
+                            scaled_sprite = sprite.scaled(
+                                piece_size,
+                                piece_size,
+                                Qt.AspectRatioMode.KeepAspectRatio,
+                                Qt.TransformationMode.SmoothTransformation
+                            )
+                            painter.drawPixmap(x, y, scaled_sprite)
+        else:
+            # Fallback to Unicode glyph rendering
+            font = QFont("DejaVu Serif")
+            font.setPixelSize(int(square_size * 0.6))
+            painter.setFont(font)
+            
+            for rank in range(8):
+                for file in range(8):
+                    piece_data = self._board[rank][file]
+                    
+                    if piece_data is not None:
+                        # Get the Unicode glyph for this piece
+                        piece_key = (piece_data["piece"], piece_data["color"])
+                        glyph = PIECE_UNICODE.get(piece_key, "")
+                        
+                        if glyph:
+                            # Calculate square bounds
+                            x = x_margin + file * square_size
+                            y = y_margin + rank * square_size
+                            rect = QRect(x, y, square_size, square_size)
+                            
+                            # Draw the piece glyph centered in the square
+                            painter.drawText(
+                                rect,
+                                Qt.AlignmentFlag.AlignCenter,
+                                glyph
+                            )
 
