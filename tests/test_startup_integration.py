@@ -374,11 +374,11 @@ class TestMainBootstrap:
     
     def test_main_handles_missing_binary_gracefully(self):
         """main() bootstrap should handle missing binary gracefully."""
-        from chess_app.engine_config import get_stockfish_path
+        from chess_app import engine_config
         
         # Mock to return None (binary not found)
         with patch('chess_app.engine_config.get_stockfish_path', return_value=None):
-            result = get_stockfish_path()
+            result = engine_config.get_stockfish_path()
             assert result is None
             
             # This would trigger the warning branch in main()
