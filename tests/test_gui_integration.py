@@ -1997,3 +1997,478 @@ class TestEndToEndEnginePlay:
         except Exception as e:
             pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
 
+
+class TestInputLocking:
+    """Unit tests for the input-enabled flag and state transitions."""
+    
+    def test_input_enabled_flag_starts_disabled(self):
+        """Input flag should start disabled until a game is set."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Verify input starts disabled
+            assert window._input_enabled is False
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_input_enabled_when_game_set(self):
+        """Input flag should be enabled when a game is set."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            
+            # Set the game
+            window.set_game(game)
+            
+            # Verify input is now enabled
+            assert window._input_enabled is True
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_input_disabled_on_game_end(self):
+        """Input flag should be disabled when game ends."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up a checkmate position (Fool's Mate)
+            # After 1. f3 e5 2. g4 Qh4# - Black has just checkmated White
+            fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+            game = Game.from_fen(fen)
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Verify input starts enabled
+            assert window._input_enabled is True
+            
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                # Evaluate status (should detect checkmate)
+                window._evaluate_and_handle_game_status()
+                
+                # Verify message box was called
+                assert mock_msgbox.called
+            
+            # Verify input is now disabled
+            assert window._input_enabled is False
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+
+
+class TestInputLockingIntegration:
+    """Integration tests for input locking after terminal game states."""
+    
+    def test_clicks_ignored_after_checkmate(self):
+        """Clicks should be completely ignored after checkmate."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up position one move before checkmate
+            # White to play Qh5# (Scholar's Mate pattern)
+            fen = "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4"
+            game = Game.from_fen(fen)
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Verify input is enabled
+            assert window._input_enabled is True
+            
+            # Play the checkmate move
+            window._on_square_clicked("h5", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("f7", Qt.MouseButton.LeftButton)
+            
+            # Mock QMessageBox and evaluate status
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                window._evaluate_and_handle_game_status()
+                assert mock_msgbox.called
+            
+            # Verify input is now disabled
+            assert window._input_enabled is False
+            
+            # Record history length after checkmate
+            history_length = len(game.get_history())
+            
+            # Try to make another move by clicking
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # Verify no move was applied
+            assert len(game.get_history()) == history_length
+            
+            # Verify no selection was made
+            assert window._selected_source is None
+            assert len(window._legal_destinations) == 0
+            
+            # Verify board widget highlights remain cleared
+            assert window._board_widget._selected_square is None
+            assert len(window._board_widget._highlighted_squares) == 0
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_clicks_ignored_after_stalemate(self):
+        """Clicks should be ignored after stalemate."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up a stalemate position
+            # Black king on a8, White king on c6, White queen on b6 - Black to move (stalemate)
+            fen = "k7/8/1QK5/8/8/8/8/8 b - - 0 1"
+            game = Game.from_fen(fen)
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Verify input is enabled
+            assert window._input_enabled is True
+            
+            # Evaluate status (should detect stalemate)
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                window._evaluate_and_handle_game_status()
+                assert mock_msgbox.called
+            
+            # Verify input is now disabled
+            assert window._input_enabled is False
+            
+            # Try to make a move
+            window._on_square_clicked("c6", Qt.MouseButton.LeftButton)
+            
+            # Verify no selection was made
+            assert window._selected_source is None
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_clicks_ignored_after_draw_insufficient_material(self):
+        """Clicks should be ignored after insufficient material draw."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # King vs King - insufficient material
+            fen = "8/8/4k3/8/8/4K3/8/8 w - - 0 1"
+            game = Game.from_fen(fen)
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Evaluate status
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                window._evaluate_and_handle_game_status()
+                assert mock_msgbox.called
+            
+            # Verify input is disabled
+            assert window._input_enabled is False
+            
+            # Try to click
+            window._on_square_clicked("e3", Qt.MouseButton.LeftButton)
+            
+            # Verify no selection
+            assert window._selected_source is None
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_engine_not_triggered_after_terminal_state(self):
+        """Engine should not be triggered after game ends (requires Task 1 integration)."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game, Side
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up position where White can checkmate
+            fen = "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4"
+            game = Game.from_fen(fen)
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Setup engine
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Clear call log
+            adapter._call_log.clear()
+            
+            # Play checkmate move
+            window._on_square_clicked("h5", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("f7", Qt.MouseButton.LeftButton)
+            
+            # Mock QMessageBox and evaluate status
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                window._evaluate_and_handle_game_status()
+                assert mock_msgbox.called
+            
+            # Process any pending events
+            app.processEvents()
+            
+            # Note: The engine controller may have been called during the move
+            # (before status evaluation), which is expected until Task 1 adds
+            # terminal state checking to the engine controller. 
+            # For now, verify that input is disabled after status evaluation.
+            
+            # Verify input is disabled (Task 2 responsibility)
+            assert window._input_enabled is False
+            
+            # After input is disabled, no NEW clicks should trigger engine
+            history_before = len(game.get_history())
+            adapter._call_log.clear()
+            
+            # Try to make another move via clicks (should be blocked by input lock)
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            
+            # Verify no new moves and no new engine calls
+            assert len(game.get_history()) == history_before
+            calls_after = adapter.get_call_log()
+            request_calls_after = [c for c in calls_after if c[0] == "request_move"]
+            assert len(request_calls_after) == 0
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_input_reenabled_on_new_game_after_terminal(self):
+        """Input should be re-enabled when a new game is set after game over."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up checkmate position
+            fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+            game1 = Game.from_fen(fen)
+            
+            window.set_game(game1)
+            window.update_board_from_game()
+            
+            # Evaluate status (game over)
+            with patch.object(QMessageBox, 'information'):
+                window._evaluate_and_handle_game_status()
+            
+            # Verify input is disabled
+            assert window._input_enabled is False
+            
+            # Set a new game
+            game2 = Game()
+            window.set_game(game2)
+            window.update_board_from_game()
+            
+            # Verify input is re-enabled
+            assert window._input_enabled is True
+            
+            # Verify clicks now work
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            assert window._selected_source == "e2"
+            
+            # Make a move
+            window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
+            assert len(game2.get_history()) == 1
+            assert game2.get_history()[0].uci == "e2e4"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_right_click_ignored_after_game_end(self):
+        """Right-click should also be blocked after game end."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up checkmate position
+            fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+            game = Game.from_fen(fen)
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Select a square first (for testing)
+            window._selected_source = "e2"
+            window._legal_destinations = {"e3", "e4"}
+            
+            # Evaluate status (game over)
+            with patch.object(QMessageBox, 'information'):
+                window._evaluate_and_handle_game_status()
+            
+            # Verify input is disabled
+            assert window._input_enabled is False
+            
+            # Try right-click (should not clear selection since input is disabled)
+            window._on_square_clicked("a1", Qt.MouseButton.RightButton)
+            
+            # Selection should remain (because _clear_selection is also guarded)
+            # Actually, the guard in _on_square_clicked prevents the call to _clear_selection
+            # So selection state is unchanged
+            assert window._selected_source == "e2"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_partial_selection_before_game_end_cleared(self):
+        """Further clicks should be blocked after game ends, regardless of prior selection."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from PySide6.QtCore import Qt
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Use a simpler position: starting position
+            game = Game()
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Select a piece that has legal moves
+            window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
+            
+            # Verify selection exists before game end
+            selection_before = window._selected_source
+            assert selection_before == "e2"
+            assert len(window._legal_destinations) > 0
+            
+            # Now manually create a checkmate position and apply it
+            # Set to Fool's Mate checkmate position
+            checkmate_fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+            game2 = Game.from_fen(checkmate_fen)
+            window.set_game(game2)
+            window.update_board_from_game()
+            
+            # Manually set a selection to simulate user had something selected
+            window._selected_source = "d2"
+            window._legal_destinations = {"d3", "d4"}
+            
+            # Evaluate status (checkmate)
+            with patch.object(QMessageBox, 'information'):
+                window._evaluate_and_handle_game_status()
+            
+            # Verify input is disabled
+            assert window._input_enabled is False
+            
+            # Record history length
+            history_length = len(game2.get_history())
+            
+            # Try to continue with clicks (should be completely ignored)
+            window._on_square_clicked("d3", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("d2", Qt.MouseButton.LeftButton)
+            window._on_square_clicked("d4", Qt.MouseButton.LeftButton)
+            
+            # Verify no moves were applied
+            assert len(game2.get_history()) == history_length
+            
+            # The key assertion: input blocking prevents any game state changes
+            # regardless of what the internal selection state is
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+

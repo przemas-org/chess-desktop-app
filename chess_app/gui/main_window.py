@@ -45,6 +45,9 @@ class MainWindow(QMainWindow):
         self._engine_controller: Optional[EngineController] = None
         self._engine_enabled: bool = False
         
+        # Input locking (disabled until game is set)
+        self._input_enabled: bool = False
+        
         # Set initial window title (no engine yet)
         self._update_window_title()
         
@@ -74,6 +77,8 @@ class MainWindow(QMainWindow):
             window.update_board_from_game()
         """
         self._game = game
+        # Enable input when a game is set
+        self._input_enabled = True
     
     def set_engine_adapter(self, adapter: EngineAdapter) -> None:
         """Set the engine adapter and create the engine controller.
@@ -164,6 +169,10 @@ class MainWindow(QMainWindow):
             square: The clicked square in algebraic notation (e.g., "e4").
             button: The mouse button used (left or right).
         """
+        # Guard: ignore all clicks when input is disabled
+        if not self._input_enabled:
+            return
+        
         # Right-click always clears selection
         if button == Qt.MouseButton.RightButton:
             self._clear_selection()
@@ -190,6 +199,10 @@ class MainWindow(QMainWindow):
         """
         # Guard: ensure game is set
         if self._game is None:
+            return
+        
+        # Guard: ignore input when disabled
+        if not self._input_enabled:
             return
         
         # Guard: block input while engine move is in flight
@@ -244,6 +257,10 @@ class MainWindow(QMainWindow):
         Args:
             square: The clicked square in algebraic notation.
         """
+        # Guard: ignore input when disabled
+        if not self._input_enabled:
+            return
+        
         # If clicking the same square, cancel selection
         if square == self._selected_source:
             self._clear_selection()
@@ -305,6 +322,10 @@ class MainWindow(QMainWindow):
         Resets the internal selection state and clears visual highlights
         in the board widget. Safe to call at any time.
         """
+        # Guard: ignore input when disabled (for complete input isolation)
+        if not self._input_enabled:
+            return
+        
         self._selected_source = None
         self._legal_destinations = set()
         self._board_widget.set_selected_square(None)
@@ -396,7 +417,8 @@ class MainWindow(QMainWindow):
         or any draw variant). It displays a modal message box with the result
         and updates the window title to reflect the game-over state.
         
-        This method does NOT handle input locking (that will be added in Task 2).
+        Additionally, this method disables further user input to prevent
+        interactions after the game has ended.
         
         Args:
             status: The terminal game status (checkmate or draw variant).
@@ -406,6 +428,9 @@ class MainWindow(QMainWindow):
             This method shows a blocking modal dialog, so it will pause execution
             until the user dismisses the message box.
         """
+        # Disable input before showing modal to ensure no interactions during dialog
+        self._input_enabled = False
+        
         # Get human-readable result description
         result_description = self._get_result_description(status, side_to_move)
         
