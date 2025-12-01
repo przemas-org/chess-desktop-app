@@ -1,12 +1,12 @@
 """Main window for the chess desktop application."""
 
 from typing import Optional
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QMainWindow, QMessageBox
 from PySide6.QtCore import Qt
 from .board_widget import BoardWidget
 from .engine_controller import EngineController
 from .engine_integration import EngineAdapter
-from ..game import Game, IllegalMoveError, Side
+from ..game import Game, IllegalMoveError, Side, GameStatus
 
 
 class MainWindow(QMainWindow):
@@ -322,6 +322,151 @@ class MainWindow(QMainWindow):
         """
         self._engine_enabled = False
         self._update_window_title()
+    
+    @staticmethod
+    def _get_result_description(status: GameStatus, side_to_move: Side) -> str:
+        """Map game status and side to human-readable result description.
+        
+        This is a pure helper function that converts domain-level game status
+        and side-to-move information into user-friendly result strings suitable
+        for display in message boxes and window titles.
+        
+        Args:
+            status: The terminal game status (checkmate or draw variant).
+            side_to_move: The side whose turn it was when terminal state occurred.
+        
+        Returns:
+            A human-readable description of the game result.
+            
+        Examples:
+            >>> MainWindow._get_result_description(GameStatus.CHECKMATE, Side.WHITE)
+            'Checkmate — Black wins'
+            >>> MainWindow._get_result_description(GameStatus.STALEMATE, Side.WHITE)
+            'Draw by stalemate'
+        """
+        if status == GameStatus.CHECKMATE:
+            # The side to move is in checkmate, so the other side wins
+            if side_to_move == Side.WHITE:
+                return "Checkmate — Black wins"
+            else:
+                return "Checkmate — White wins"
+        elif status == GameStatus.STALEMATE:
+            return "Draw by stalemate"
+        elif status == GameStatus.DRAW_INSUFFICIENT_MATERIAL:
+            return "Draw by insufficient material"
+        elif status == GameStatus.DRAW_50_MOVE:
+            return "Draw by fifty-move rule"
+        elif status == GameStatus.DRAW_OTHER:
+            return "Draw by repetition"
+        else:
+            # Fallback for unexpected status
+            return f"Game ended: {status.value}"
+    
+    @staticmethod
+    def _get_ongoing_status_text(status: GameStatus, side_to_move: Side) -> str:
+        """Get brief status text for ongoing games.
+        
+        This is a pure helper function that creates concise status text
+        for the window title when the game is still in progress.
+        
+        Args:
+            status: The current game status (ongoing or check).
+            side_to_move: The side whose turn it is.
+        
+        Returns:
+            Brief status text suitable for window title.
+            
+        Examples:
+            >>> MainWindow._get_ongoing_status_text(GameStatus.ONGOING, Side.WHITE)
+            'White to move'
+            >>> MainWindow._get_ongoing_status_text(GameStatus.CHECK, Side.BLACK)
+            'Black to move — in check'
+        """
+        side_name = "White" if side_to_move == Side.WHITE else "Black"
+        
+        if status == GameStatus.CHECK:
+            return f"{side_name} to move — in check"
+        else:
+            return f"{side_name} to move"
+    
+    def _handle_game_end(self, status: GameStatus, side_to_move: Side) -> None:
+        """Handle terminal game states with modal dialog and title update.
+        
+        This method is called when the game reaches a terminal state (checkmate
+        or any draw variant). It displays a modal message box with the result
+        and updates the window title to reflect the game-over state.
+        
+        This method does NOT handle input locking (that will be added in Task 2).
+        
+        Args:
+            status: The terminal game status (checkmate or draw variant).
+            side_to_move: The side whose turn it was when terminal state occurred.
+        
+        Note:
+            This method shows a blocking modal dialog, so it will pause execution
+            until the user dismisses the message box.
+        """
+        # Get human-readable result description
+        result_description = self._get_result_description(status, side_to_move)
+        
+        # Show modal message box with result
+        QMessageBox.information(
+            self,
+            "Game Over",
+            result_description,
+            QMessageBox.StandardButton.Ok
+        )
+        
+        # Update window title to game-over format
+        base_title = "Chess Desktop App"
+        self.setWindowTitle(f"{base_title} — Game Over: {result_description}")
+    
+    def _evaluate_and_handle_game_status(self) -> None:
+        """Evaluate current game status and handle terminal states or update title.
+        
+        This is the main entry point for game status evaluation. It queries the
+        game model for current status and side-to-move, then either:
+        - For terminal states: delegates to _handle_game_end()
+        - For non-terminal states: updates window title with ongoing status
+        
+        This method should be called after every move (human or engine) to keep
+        the UI in sync with the game state.
+        
+        Note:
+            This method requires a game to be set via set_game(). If no game is
+            set, it returns early without doing anything.
+        """
+        # Guard: ensure game is set
+        if self._game is None:
+            return
+        
+        # Query game state
+        status = self._game.get_status()
+        side_to_move = self._game.get_side_to_move()
+        
+        # Check if terminal state
+        terminal_statuses = {
+            GameStatus.CHECKMATE,
+            GameStatus.STALEMATE,
+            GameStatus.DRAW_INSUFFICIENT_MATERIAL,
+            GameStatus.DRAW_50_MOVE,
+            GameStatus.DRAW_OTHER
+        }
+        
+        if status in terminal_statuses:
+            # Handle game end
+            self._handle_game_end(status, side_to_move)
+        else:
+            # Update title with ongoing status
+            ongoing_text = self._get_ongoing_status_text(status, side_to_move)
+            
+            # Preserve engine availability info in title
+            if self._engine_enabled:
+                base = "Chess Desktop App — Engine Enabled"
+            else:
+                base = "Chess Desktop App — Human vs Human"
+            
+            self.setWindowTitle(f"{base} ({ongoing_text})")
     
     def _update_window_title(self) -> None:
         """Update the window title based on engine availability.

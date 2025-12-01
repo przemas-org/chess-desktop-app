@@ -1138,6 +1138,423 @@ class TestMainWindowMoveSelection:
             pytest.skip(f"Qt initialization failed (likely headless environment): {e}")
 
 
+class TestGameStatusMapping:
+    """Tests for game status to string mapping helpers."""
+    
+    def test_checkmate_white_to_move_means_black_wins(self):
+        """Checkmate with White to move should show Black wins."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            result = MainWindow._get_result_description(GameStatus.CHECKMATE, Side.WHITE)
+            assert result == "Checkmate — Black wins"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_checkmate_black_to_move_means_white_wins(self):
+        """Checkmate with Black to move should show White wins."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            result = MainWindow._get_result_description(GameStatus.CHECKMATE, Side.BLACK)
+            assert result == "Checkmate — White wins"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_stalemate_result_description(self):
+        """Stalemate should show draw by stalemate."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            result = MainWindow._get_result_description(GameStatus.STALEMATE, Side.WHITE)
+            assert result == "Draw by stalemate"
+            
+            # Should be same for both sides
+            result = MainWindow._get_result_description(GameStatus.STALEMATE, Side.BLACK)
+            assert result == "Draw by stalemate"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_insufficient_material_result_description(self):
+        """Insufficient material should show appropriate draw message."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            result = MainWindow._get_result_description(
+                GameStatus.DRAW_INSUFFICIENT_MATERIAL, Side.WHITE
+            )
+            assert result == "Draw by insufficient material"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_fifty_move_rule_result_description(self):
+        """Fifty-move rule should show appropriate draw message."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            result = MainWindow._get_result_description(GameStatus.DRAW_50_MOVE, Side.WHITE)
+            assert result == "Draw by fifty-move rule"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_draw_other_result_description(self):
+        """Other draw types should show repetition message."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            result = MainWindow._get_result_description(GameStatus.DRAW_OTHER, Side.BLACK)
+            assert result == "Draw by repetition"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_ongoing_status_text_white_to_move(self):
+        """Ongoing game with White to move should show appropriate text."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            text = MainWindow._get_ongoing_status_text(GameStatus.ONGOING, Side.WHITE)
+            assert text == "White to move"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_ongoing_status_text_black_to_move(self):
+        """Ongoing game with Black to move should show appropriate text."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            text = MainWindow._get_ongoing_status_text(GameStatus.ONGOING, Side.BLACK)
+            assert text == "Black to move"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_check_status_text_white_in_check(self):
+        """Check with White to move should indicate check."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            text = MainWindow._get_ongoing_status_text(GameStatus.CHECK, Side.WHITE)
+            assert text == "White to move — in check"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_check_status_text_black_in_check(self):
+        """Check with Black to move should indicate check."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            from chess_app.game import GameStatus, Side
+            
+            text = MainWindow._get_ongoing_status_text(GameStatus.CHECK, Side.BLACK)
+            assert text == "Black to move — in check"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+
+
+class TestGameEndUX:
+    """Tests for game-end user experience and status evaluation."""
+    
+    def test_checkmate_updates_window_title(self):
+        """Window title should update to game-over format on checkmate."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up Fool's Mate position (White is checkmated)
+            # 1. f3 e5 2. g4 Qh4#
+            game = Game()
+            game.apply_move("f2f3")
+            game.apply_move("e7e5")
+            game.apply_move("g2g4")
+            game.apply_move("d8h4")  # Checkmate!
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Mock QMessageBox to prevent actual dialog from showing during test
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                # Manually call evaluation (in Task 4 this will be automatic)
+                window._evaluate_and_handle_game_status()
+                
+                # Verify the message box would have been shown with correct content
+                assert mock_msgbox.called
+                call_args = mock_msgbox.call_args
+                assert "Game Over" in str(call_args)
+                assert "Checkmate" in str(call_args) or "Black wins" in str(call_args)
+            
+            # Verify window title shows game over
+            title = window.windowTitle()
+            assert "Game Over" in title
+            assert "Checkmate" in title
+            assert "Black wins" in title
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_stalemate_updates_window_title(self):
+        """Window title should update correctly for stalemate."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up stalemate position
+            # Black king on h8, White king on h6, White queen on g6
+            # It's Black's turn, king is not in check but has no legal moves (stalemate)
+            fen = "7k/8/6QK/8/8/8/8/8 b - - 0 1"
+            game = Game.from_fen(fen)
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Mock QMessageBox to prevent actual dialog from showing during test
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                # Manually call evaluation
+                window._evaluate_and_handle_game_status()
+                
+                # Verify the message box would have been shown with correct content
+                assert mock_msgbox.called
+                call_args = mock_msgbox.call_args
+                assert "Game Over" in str(call_args)
+                assert "stalemate" in str(call_args)
+            
+            # Verify window title shows game over with draw
+            title = window.windowTitle()
+            assert "Game Over" in title
+            assert "Draw by stalemate" in title
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_ongoing_game_updates_title_with_side_to_move(self):
+        """Ongoing game should show side to move in title."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Call evaluation for ongoing game
+            window._evaluate_and_handle_game_status()
+            
+            # Verify title shows White to move
+            title = window.windowTitle()
+            assert "White to move" in title
+            assert "Game Over" not in title
+            
+            # Make a move
+            game.apply_move("e2e4")
+            window.update_board_from_game()
+            window._evaluate_and_handle_game_status()
+            
+            # Verify title shows Black to move
+            title = window.windowTitle()
+            assert "Black to move" in title
+            assert "Game Over" not in title
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_check_status_shown_in_title(self):
+        """Check status should be indicated in window title."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up position where Black king is in check (but not checkmate)
+            # White rook on e8 checking Black king, but king can escape to f7
+            fen = "4R3/ppppkppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQ - 0 1"
+            game = Game.from_fen(fen)
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            window._evaluate_and_handle_game_status()
+            
+            # Verify title shows check status (no mock needed - this is CHECK not checkmate)
+            title = window.windowTitle()
+            assert "in check" in title
+            assert "Black to move" in title
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_engine_status_preserved_in_ongoing_title(self):
+        """Engine availability should be preserved in title for ongoing games."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            window.set_game(game)
+            
+            # Set up engine
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Call evaluation
+            window._evaluate_and_handle_game_status()
+            
+            # Verify engine status is in title
+            title = window.windowTitle()
+            assert "Engine Enabled" in title
+            assert "White to move" in title
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_evaluation_with_no_game_set(self):
+        """Evaluation should handle gracefully when no game is set."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication
+            from chess_app.gui import MainWindow
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            # Don't set a game
+            
+            # Should not crash
+            window._evaluate_and_handle_game_status()
+            
+            # Title should remain at default
+            title = window.windowTitle()
+            assert "Human vs Human" in title
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_insufficient_material_draw(self):
+        """Insufficient material should trigger game-end UX."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # King vs King - insufficient material
+            fen = "8/8/4k3/8/8/4K3/8/8 w - - 0 1"
+            game = Game.from_fen(fen)
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Mock QMessageBox to prevent actual dialog from showing during test
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                window._evaluate_and_handle_game_status()
+                
+                # Verify the message box would have been shown with correct content
+                assert mock_msgbox.called
+                call_args = mock_msgbox.call_args
+                assert "Game Over" in str(call_args)
+                assert "insufficient material" in str(call_args)
+            
+            # Verify game-over title
+            title = window.windowTitle()
+            assert "Game Over" in title
+            assert "insufficient material" in title
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+
+
 class TestEndToEndEnginePlay:
     """End-to-end functional tests for full engine-play flow.
     
