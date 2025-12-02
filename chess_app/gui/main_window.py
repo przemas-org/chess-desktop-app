@@ -114,7 +114,7 @@ class MainWindow(QMainWindow):
         
         # Connect controller signals
         self._engine_controller.engine_move_applied.connect(
-            self.update_board_from_game
+            self._on_engine_move_applied
         )
         self._engine_controller.engine_disabled.connect(
             self._on_engine_disabled
@@ -302,10 +302,13 @@ class MainWindow(QMainWindow):
             # Update the board from the new game state
             self.update_board_from_game()
             
+            # Evaluate game status and handle terminal states
+            self._evaluate_and_handle_game_status()
+            
             # Clear selection after successful move
             self._clear_selection()
             
-            # Trigger engine move if available
+            # Trigger engine move if available (only if game is ongoing)
             if self._engine_controller:
                 self._engine_controller.on_human_move_applied()
             
@@ -330,6 +333,23 @@ class MainWindow(QMainWindow):
         self._legal_destinations = set()
         self._board_widget.set_selected_square(None)
         self._board_widget.set_highlighted_squares([])
+    
+    def _on_engine_move_applied(self) -> None:
+        """Handle engine move completion: update board and evaluate status.
+        
+        This method is called when the engine controller successfully applies
+        an engine move to the game. It updates the board display from the new
+        game state and evaluates the game status to detect terminal conditions
+        or update the window title with the current state.
+        
+        This ensures that engine moves trigger the same status evaluation flow
+        as human moves, maintaining consistent game-end detection and UI updates.
+        """
+        # Update the board from the new game state
+        self.update_board_from_game()
+        
+        # Evaluate game status and handle terminal states
+        self._evaluate_and_handle_game_status()
     
     def _on_engine_disabled(self, reason: str) -> None:
         """Handle engine being permanently disabled.
