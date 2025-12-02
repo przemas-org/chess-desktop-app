@@ -2119,13 +2119,10 @@ class TestInputLockingIntegration:
             # Verify input is enabled
             assert window._input_enabled is True
             
-            # Play the checkmate move
-            window._on_square_clicked("h5", Qt.MouseButton.LeftButton)
-            window._on_square_clicked("f7", Qt.MouseButton.LeftButton)
-            
-            # Mock QMessageBox and evaluate status
+            # Play the checkmate move (mock QMessageBox to prevent dialog)
             with patch.object(QMessageBox, 'information') as mock_msgbox:
-                window._evaluate_and_handle_game_status()
+                window._on_square_clicked("h5", Qt.MouseButton.LeftButton)
+                window._on_square_clicked("f7", Qt.MouseButton.LeftButton)
                 assert mock_msgbox.called
             
             # Verify input is now disabled
@@ -2272,13 +2269,10 @@ class TestInputLockingIntegration:
             # Clear call log
             adapter._call_log.clear()
             
-            # Play checkmate move
-            window._on_square_clicked("h5", Qt.MouseButton.LeftButton)
-            window._on_square_clicked("f7", Qt.MouseButton.LeftButton)
-            
-            # Mock QMessageBox and evaluate status
+            # Play checkmate move (mock QMessageBox to prevent dialog)
             with patch.object(QMessageBox, 'information') as mock_msgbox:
-                window._evaluate_and_handle_game_status()
+                window._on_square_clicked("h5", Qt.MouseButton.LeftButton)
+                window._on_square_clicked("f7", Qt.MouseButton.LeftButton)
                 assert mock_msgbox.called
             
             # Process any pending events

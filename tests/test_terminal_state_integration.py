@@ -545,11 +545,12 @@ class TestMainWindowPostMoveStatusEvaluation:
         pytest.importorskip("PySide6")
         
         try:
-            from PySide6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication, QMessageBox
             from PySide6.QtCore import Qt
             from chess_app.game import Game, GameStatus
             from chess_app.gui import MainWindow
             from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
             
             app = QApplication.instance()
             if app is None:
@@ -571,9 +572,10 @@ class TestMainWindowPostMoveStatusEvaluation:
             adapter.simulate_init_success()
             window.set_engine_adapter(adapter)
             
-            # White moves rook to e8, giving check
-            window._on_square_clicked("e1", Qt.MouseButton.LeftButton)
-            window._on_square_clicked("e8", Qt.MouseButton.LeftButton)
+            # White moves rook to e8, giving check (mock QMessageBox in case it's checkmate)
+            with patch.object(QMessageBox, 'information'):
+                window._on_square_clicked("e1", Qt.MouseButton.LeftButton)
+                window._on_square_clicked("e8", Qt.MouseButton.LeftButton)
             app.processEvents()
             
             # Verify game is in check
