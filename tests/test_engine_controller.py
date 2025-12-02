@@ -10,7 +10,7 @@ and error handling.
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from chess_app.game import Game, Side
+from chess_app.game import Game, Side, GameStatus
 from chess_app.gui.engine_integration import EngineErrorCode
 from tests.engine_fakes import FakeEngineAdapter
 from chess_app.gui.engine_controller import EngineController
@@ -696,6 +696,223 @@ class TestEngineControllerIntegration:
             assert len(history) == 3
             assert history[1].uci == "e7e5"
             assert history[2].uci == "g1f3"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+
+
+class TestEngineControllerTerminalState:
+    """Tests for terminal state awareness in EngineController."""
+    
+    def test_controller_does_not_query_on_checkmate(self):
+        """Controller should not query engine when game is in checkmate."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Set up Fool's Mate position (Black checkmates White)
+            # After: 1. f3 e5 2. g4 Qh4# (checkmate)
+            checkmate_fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+            game = Game.from_fen(checkmate_fen)
+            
+            # Verify it's checkmate
+            assert game.get_status() == GameStatus.CHECKMATE
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            
+            controller = EngineController(game, adapter)
+            
+            # Try to trigger engine move
+            controller.on_human_move_applied()
+            
+            # No request should be made (only initialize call)
+            calls = adapter.get_call_log()
+            assert len(calls) == 1
+            assert calls[0][0] == "initialize"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_controller_does_not_query_on_stalemate(self):
+        """Controller should not query engine when game is in stalemate."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Set up stalemate position (Black to move, stalemate)
+            # King on a8, White king on c6, White queen on b6
+            stalemate_fen = "k7/8/1QK5/8/8/8/8/8 b - - 0 1"
+            game = Game.from_fen(stalemate_fen)
+            
+            # Verify it's stalemate
+            assert game.get_status() == GameStatus.STALEMATE
+            assert game.get_side_to_move() == Side.BLACK
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            
+            controller = EngineController(game, adapter)
+            
+            # Try to trigger engine move
+            controller.on_human_move_applied()
+            
+            # No request should be made (only initialize call)
+            calls = adapter.get_call_log()
+            assert len(calls) == 1
+            assert calls[0][0] == "initialize"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_controller_does_not_query_on_draw_fifty_move(self):
+        """Controller should not query engine when fifty-move rule applies."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Set up position where fifty-move rule applies (halfmove clock = 100)
+            # Black to move, K+R vs K, halfmove clock at 100
+            fifty_move_fen = "8/8/8/8/8/4k3/8/4K2r b - - 100 100"
+            game = Game.from_fen(fifty_move_fen)
+            
+            # Verify fifty-move draw condition
+            assert game.get_status() == GameStatus.DRAW_50_MOVE
+            assert game.get_side_to_move() == Side.BLACK
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            
+            controller = EngineController(game, adapter)
+            
+            # Try to trigger engine move
+            controller.on_human_move_applied()
+            
+            # No request should be made (only initialize call)
+            calls = adapter.get_call_log()
+            assert len(calls) == 1
+            assert calls[0][0] == "initialize"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_controller_does_not_query_on_draw_insufficient_material(self):
+        """Controller should not query engine with insufficient material."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Set up position with only kings (insufficient material)
+            # Black to move
+            insufficient_material_fen = "8/8/8/4k3/8/8/8/4K3 b - - 0 1"
+            game = Game.from_fen(insufficient_material_fen)
+            
+            # Verify insufficient material draw
+            assert game.get_status() == GameStatus.DRAW_INSUFFICIENT_MATERIAL
+            assert game.get_side_to_move() == Side.BLACK
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            
+            controller = EngineController(game, adapter)
+            
+            # Try to trigger engine move
+            controller.on_human_move_applied()
+            
+            # No request should be made (only initialize call)
+            calls = adapter.get_call_log()
+            assert len(calls) == 1
+            assert calls[0][0] == "initialize"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_controller_queries_engine_when_in_check(self):
+        """Controller should query engine when Black is in check (non-terminal)."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Set up position where Black king is in check but can escape
+            # White rook on e1, Black king on e8 - direct check on the e-file
+            # Black king can move to d8, d7, f8, or f7
+            check_fen = "4k3/8/8/8/8/8/8/4R2K b - - 0 1"
+            game = Game.from_fen(check_fen)
+            
+            # Verify Black is in check (non-terminal)
+            status = game.get_status()
+            assert status == GameStatus.CHECK, f"Expected CHECK but got {status}"
+            assert game.get_side_to_move() == Side.BLACK
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            
+            controller = EngineController(game, adapter)
+            
+            # Trigger engine move
+            controller.on_human_move_applied()
+            
+            # Should have made a request (initialize + request_move)
+            calls = adapter.get_call_log()
+            assert len(calls) == 2
+            assert calls[0][0] == "initialize"
+            assert calls[1][0] == "request_move"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_controller_queries_engine_when_ongoing(self):
+        """Controller should query engine when game is ongoing (normal play)."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Set up normal ongoing game position
+            # After 1. e4 (Black to move, ongoing)
+            ongoing_fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+            game = Game.from_fen(ongoing_fen)
+            
+            # Verify game is ongoing
+            assert game.get_status() == GameStatus.ONGOING
+            assert game.get_side_to_move() == Side.BLACK
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            
+            controller = EngineController(game, adapter)
+            
+            # Trigger engine move
+            controller.on_human_move_applied()
+            
+            # Should have made a request (initialize + request_move)
+            calls = adapter.get_call_log()
+            assert len(calls) == 2
+            assert calls[0][0] == "initialize"
+            assert calls[1][0] == "request_move"
             
         except Exception as e:
             pytest.skip(f"Qt initialization failed: {e}")

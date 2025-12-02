@@ -9,7 +9,7 @@ move validation, re-query logic, and error handling.
 from typing import Optional
 from PySide6.QtCore import QObject, Signal
 
-from ..game import Game, Side, IllegalMoveError
+from ..game import Game, Side, GameStatus, IllegalMoveError
 from .engine_integration import EngineAdapter, EngineErrorCode
 
 
@@ -96,6 +96,7 @@ class EngineController(QObject):
         - Engine is enabled
         - No request currently in flight
         - It is the engine's turn (Black to move in v1)
+        - Game is not in a terminal state (checkmate, stalemate, or draw)
         
         If all conditions are met, exports FEN from Game and requests a move
         from the adapter.
@@ -117,6 +118,13 @@ class EngineController(QObject):
         
         # Guard: check if it's the engine's turn
         if self._game.get_side_to_move() != self._engine_side:
+            return
+        
+        # Guard: check if game is in a terminal state
+        status = self._game.get_status()
+        if status in (GameStatus.CHECKMATE, GameStatus.STALEMATE,
+                      GameStatus.DRAW_50_MOVE, GameStatus.DRAW_INSUFFICIENT_MATERIAL,
+                      GameStatus.DRAW_OTHER):
             return
         
         # Reset illegal move counter for new position
