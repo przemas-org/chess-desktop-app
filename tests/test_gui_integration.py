@@ -692,10 +692,11 @@ class TestMainWindowEngineStatus:
         pytest.importorskip("PySide6")
         
         try:
-            from PySide6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication, QMessageBox
             from chess_app.game import Game
             from chess_app.gui import MainWindow
             from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
             
             app = QApplication.instance()
             if app is None:
@@ -713,8 +714,10 @@ class TestMainWindowEngineStatus:
             
             assert window.windowTitle() == "Chess Desktop App - Engine Enabled"
             
-            # Disable engine
-            window._on_engine_disabled("Test reason")
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information'):
+                # Disable engine
+                window._on_engine_disabled("Test reason")
             
             # Title should revert
             assert window.windowTitle() == "Chess Desktop App - Human vs Human"
@@ -1701,11 +1704,12 @@ class TestEndToEndEnginePlay:
         pytest.importorskip("PySide6")
         
         try:
-            from PySide6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication, QMessageBox
             from PySide6.QtCore import Qt
             from chess_app.game import Game, Side
             from chess_app.gui import MainWindow
             from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
             
             app = QApplication.instance()
             if app is None:
@@ -1732,13 +1736,15 @@ class TestEndToEndEnginePlay:
             window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
             window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
             
-            # First illegal move
-            adapter.simulate_move_response("z9z9")
-            app.processEvents()
-            
-            # Second illegal move (on re-query)
-            adapter.simulate_move_response("z8z8")
-            app.processEvents()
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information'):
+                # First illegal move
+                adapter.simulate_move_response("z9z9")
+                app.processEvents()
+                
+                # Second illegal move (on re-query)
+                adapter.simulate_move_response("z8z8")
+                app.processEvents()
             
             # Verify engine disabled
             assert window._engine_enabled is False
@@ -1771,12 +1777,13 @@ class TestEndToEndEnginePlay:
         pytest.importorskip("PySide6")
         
         try:
-            from PySide6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication, QMessageBox
             from PySide6.QtCore import Qt
             from chess_app.game import Game, Side
             from chess_app.gui import MainWindow
             from tests.engine_fakes import FakeEngineAdapter
             from chess_app.gui.engine_integration import EngineErrorCode
+            from unittest.mock import patch
             
             app = QApplication.instance()
             if app is None:
@@ -1803,12 +1810,14 @@ class TestEndToEndEnginePlay:
             window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
             window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
             
-            # Simulate engine timeout
-            adapter.simulate_move_failure(
-                EngineErrorCode.TIMEOUT,
-                "Engine did not respond within 1000ms"
-            )
-            app.processEvents()
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information'):
+                # Simulate engine timeout
+                adapter.simulate_move_failure(
+                    EngineErrorCode.TIMEOUT,
+                    "Engine did not respond within 1000ms"
+                )
+                app.processEvents()
             
             # Verify engine disabled
             assert window._engine_enabled is False
@@ -1847,12 +1856,13 @@ class TestEndToEndEnginePlay:
         pytest.importorskip("PySide6")
         
         try:
-            from PySide6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication, QMessageBox
             from PySide6.QtCore import Qt
             from chess_app.game import Game, Side
             from chess_app.gui import MainWindow
             from tests.engine_fakes import FakeEngineAdapter
             from chess_app.gui.engine_integration import EngineErrorCode
+            from unittest.mock import patch
             
             app = QApplication.instance()
             if app is None:
@@ -1879,12 +1889,14 @@ class TestEndToEndEnginePlay:
             window._on_square_clicked("e2", Qt.MouseButton.LeftButton)
             window._on_square_clicked("e4", Qt.MouseButton.LeftButton)
             
-            # Simulate engine crash
-            adapter.simulate_move_failure(
-                EngineErrorCode.PROCESS_CRASHED,
-                "Stockfish process crashed unexpectedly"
-            )
-            app.processEvents()
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information'):
+                # Simulate engine crash
+                adapter.simulate_move_failure(
+                    EngineErrorCode.PROCESS_CRASHED,
+                    "Stockfish process crashed unexpectedly"
+                )
+                app.processEvents()
             
             # Verify engine disabled
             assert window._engine_enabled is False
@@ -2739,6 +2751,336 @@ class TestWindowTitleComputation:
             assert "Engine Enabled" not in title_no_engine
             assert "Human vs Human" not in title_no_engine
             assert title_no_engine == "Chess Desktop App — Game Over: Checkmate — Black wins"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+
+
+class TestEngineDisablementUX:
+    """Tests for engine disablement user experience and fallback behavior."""
+    
+    def test_engine_disabled_updates_flag_and_title(self):
+        """Engine disabled signal should update flag and change title to Human vs Human."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            game.apply_move("e2e4")  # White plays, Black to move
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Set up engine adapter
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Verify engine is initially enabled
+            assert window._engine_enabled is True
+            initial_title = window.windowTitle()
+            assert "Engine Enabled" in initial_title
+            
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                # Simulate engine_disabled signal
+                window._engine_controller.engine_disabled.emit(
+                    "Engine error (TIMEOUT): Test timeout"
+                )
+                app.processEvents()
+            
+            # Verify flag is updated
+            assert window._engine_enabled is False
+            
+            # Verify title changed to Human vs Human
+            updated_title = window.windowTitle()
+            assert "Human vs Human" in updated_title
+            assert "Engine Enabled" not in updated_title
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_engine_disabled_shows_modal_once(self):
+        """Modal dialog should be shown exactly once with user-friendly message."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            game.apply_move("e2e4")  # White plays
+            
+            window.set_game(game)
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information') as mock_msgbox:
+                # Simulate engine_disabled signal
+                window._engine_controller.engine_disabled.emit(
+                    "Engine error (TIMEOUT): Test timeout"
+                )
+                app.processEvents()
+                
+                # Assert modal was called exactly once
+                assert mock_msgbox.call_count == 1
+                
+                # Verify user-friendly message (no technical error codes)
+                call_args = mock_msgbox.call_args
+                args_str = str(call_args)
+                
+                # Check for user-friendly title
+                assert "Engine Disabled" in args_str or "engine" in args_str.lower()
+                
+                # Check for Human vs Human mention
+                assert "Human vs Human" in args_str or "human" in args_str.lower()
+                
+                # Verify no technical error codes in the message
+                # The reason string contains "TIMEOUT" but it should not be in the modal
+                assert "TIMEOUT" not in args_str
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_subsequent_moves_work_for_both_sides(self):
+        """After engine disablement, both White and Black moves should be accepted."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game, Side
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            game.apply_move("e2e4")  # White plays, Black to move
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information'):
+                # Simulate engine_disabled signal
+                window._engine_controller.engine_disabled.emit(
+                    "Engine error (TIMEOUT): Test timeout"
+                )
+                app.processEvents()
+            
+            # Now engine is disabled - both sides should be playable by humans
+            # Verify current position
+            assert game.get_side_to_move() == Side.BLACK
+            history_length = len(game.get_history())
+            
+            # Black move (now human-controlled, not engine)
+            game.apply_move("e7e5")
+            window.update_board_from_game()
+            assert game.get_side_to_move() == Side.WHITE
+            assert len(game.get_history()) == history_length + 1
+            
+            # White move
+            game.apply_move("g1f3")
+            window.update_board_from_game()
+            assert game.get_side_to_move() == Side.BLACK
+            assert len(game.get_history()) == history_length + 2
+            
+            # Another Black move
+            game.apply_move("b8c6")
+            window.update_board_from_game()
+            assert game.get_side_to_move() == Side.WHITE
+            assert len(game.get_history()) == history_length + 3
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_no_further_engine_requests_after_disablement(self):
+        """No further engine requests should be made after disablement."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            game.apply_move("e2e4")  # White plays, Black to move
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Get initial call count (should have initialize call)
+            initial_calls = adapter.get_call_log()
+            initial_request_calls = [c for c in initial_calls if c[0] == "request_move"]
+            
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information'):
+                # Simulate engine_disabled signal
+                window._engine_controller.engine_disabled.emit(
+                    "Engine error (TIMEOUT): Test timeout"
+                )
+                app.processEvents()
+            
+            # Make several moves (alternating sides)
+            game.apply_move("e7e5")  # Black (human)
+            window.update_board_from_game()
+            # Notify controller (should not make any request)
+            window._engine_controller.on_human_move_applied()
+            app.processEvents()
+            
+            game.apply_move("g1f3")  # White (human)
+            window.update_board_from_game()
+            
+            game.apply_move("b8c6")  # Black (human)
+            window.update_board_from_game()
+            # Notify controller again (should not make any request)
+            window._engine_controller.on_human_move_applied()
+            app.processEvents()
+            
+            # Verify no new engine requests were made
+            final_calls = adapter.get_call_log()
+            final_request_calls = [c for c in final_calls if c[0] == "request_move"]
+            assert len(final_request_calls) == len(initial_request_calls)
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_input_remains_enabled_for_ongoing_game(self):
+        """Input should remain enabled when engine disabled during ongoing game."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            game = Game()
+            game.apply_move("e2e4")  # White plays, Black to move
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Verify input is enabled before disablement
+            assert window._input_enabled is True
+            
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information'):
+                # Simulate engine_disabled signal
+                window._engine_controller.engine_disabled.emit(
+                    "Engine error (TIMEOUT): Test timeout"
+                )
+                app.processEvents()
+            
+            # Verify input remains enabled (game is ongoing)
+            assert window._input_enabled is True
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_input_disabled_when_game_already_over(self):
+        """Input should remain disabled if game is already over when engine disabled."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from chess_app.game import Game, GameStatus
+            from chess_app.gui import MainWindow
+            from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
+            
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            window = MainWindow()
+            
+            # Set up a checkmate position (game over)
+            # Fool's Mate: 1. f3 e5 2. g4 Qh4#
+            fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+            game = Game.from_fen(fen)
+            assert game.get_status() == GameStatus.CHECKMATE
+            
+            window.set_game(game)
+            window.update_board_from_game()
+            
+            # Set up engine adapter
+            adapter = FakeEngineAdapter()
+            adapter.initialize()
+            adapter.simulate_init_success()
+            window.set_engine_adapter(adapter)
+            
+            # Mock QMessageBox to handle both game-over and engine-disabled dialogs
+            with patch.object(QMessageBox, 'information'):
+                # Trigger game status evaluation (which disables input)
+                window._evaluate_and_handle_game_status()
+                app.processEvents()
+                
+                # Verify input is disabled due to game over
+                assert window._input_enabled is False
+                
+                # Now simulate engine_disabled signal
+                window._engine_controller.engine_disabled.emit(
+                    "Engine error (TIMEOUT): Test timeout"
+                )
+                app.processEvents()
+            
+            # Verify input remains disabled (game is already over)
+            assert window._input_enabled is False
             
         except Exception as e:
             pytest.skip(f"Qt initialization failed: {e}")

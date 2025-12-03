@@ -600,11 +600,12 @@ class TestMainWindowPostMoveStatusEvaluation:
         pytest.importorskip("PySide6")
         
         try:
-            from PySide6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication, QMessageBox
             from PySide6.QtCore import Qt
             from chess_app.game import Game
             from chess_app.gui import MainWindow
             from tests.engine_fakes import FakeEngineAdapter
+            from unittest.mock import patch
             
             app = QApplication.instance()
             if app is None:
@@ -640,9 +641,11 @@ class TestMainWindowPostMoveStatusEvaluation:
             assert "Engine Enabled" in title
             assert "White to move" in title
             
-            # Now disable engine
-            window._on_engine_disabled("Test")
-            app.processEvents()
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information'):
+                # Now disable engine
+                window._on_engine_disabled("Test")
+                app.processEvents()
             
             # Title should show Human vs Human but not engine status
             title = window.windowTitle()

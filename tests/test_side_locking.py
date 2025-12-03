@@ -127,11 +127,12 @@ class TestSideLockingBasics:
         pytest.importorskip("PySide6")
         
         try:
-            from PySide6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication, QMessageBox
             from PySide6.QtCore import Qt
             from chess_app.game import Game, Side
             from chess_app.gui import MainWindow
             from tests.engine_fakes import FakeEngineAdapter, EngineErrorCode
+            from unittest.mock import patch
             
             app = QApplication.instance()
             if app is None:
@@ -153,12 +154,14 @@ class TestSideLockingBasics:
             window.update_board_from_game()
             window._engine_controller.on_human_move_applied()
             
-            # Simulate engine error to disable it
-            adapter.simulate_move_failure(
-                EngineErrorCode.TIMEOUT,
-                "Test timeout"
-            )
-            app.processEvents()
+            # Mock QMessageBox to prevent actual dialog
+            with patch.object(QMessageBox, 'information'):
+                # Simulate engine error to disable it
+                adapter.simulate_move_failure(
+                    EngineErrorCode.TIMEOUT,
+                    "Test timeout"
+                )
+                app.processEvents()
             
             # Verify engine is disabled
             assert not window._engine_controller.is_enabled()

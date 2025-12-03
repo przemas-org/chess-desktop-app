@@ -358,14 +358,25 @@ class MainWindow(QMainWindow):
         
         This is called when the engine controller disables the engine due to
         repeated failures or errors. Updates the window title to reflect
-        that the engine is no longer available.
+        that the engine is no longer available, and displays a user-friendly
+        modal message informing the user of the switch to Human vs Human mode.
         
         Args:
-            reason: Human-readable description of why engine was disabled.
+            reason: Human-readable description of why engine was disabled
+                   (for internal logging; not shown to user).
         """
         self._engine_enabled = False
         title = self._compute_window_title(self._engine_enabled, self._game)
         self.setWindowTitle(title)
+        
+        # Show user-friendly modal message (no technical error codes)
+        QMessageBox.information(
+            self,
+            "Engine Disabled",
+            "The chess engine encountered an error and has been disabled. "
+            "The game will continue in Human vs Human mode.",
+            QMessageBox.StandardButton.Ok
+        )
     
     @staticmethod
     def _get_result_description(status: GameStatus, side_to_move: Side) -> str:
