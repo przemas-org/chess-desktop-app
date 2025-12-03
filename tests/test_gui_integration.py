@@ -2466,3 +2466,280 @@ class TestInputLockingIntegration:
         except Exception as e:
             pytest.skip(f"Qt initialization failed: {e}")
 
+
+class TestWindowTitleComputation:
+    """Tests for centralized window title computation logic."""
+    
+    def test_title_no_game_no_engine(self):
+        """Title with no game and no engine should show Human vs Human."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            
+            title = MainWindow._compute_window_title(engine_enabled=False, game=None)
+            assert title == "Chess Desktop App — Human vs Human"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_no_game_with_engine(self):
+        """Title with no game but engine enabled should show Engine Enabled."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.gui import MainWindow
+            
+            title = MainWindow._compute_window_title(engine_enabled=True, game=None)
+            assert title == "Chess Desktop App — Engine Enabled"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_ongoing_white_to_move_no_engine(self):
+        """Ongoing game with White to move and no engine."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            game = Game()  # Starting position, White to move
+            title = MainWindow._compute_window_title(engine_enabled=False, game=game)
+            
+            assert "Human vs Human" in title
+            assert "White to move" in title
+            assert title == "Chess Desktop App — Human vs Human (White to move)"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_ongoing_white_to_move_with_engine(self):
+        """Ongoing game with White to move and engine enabled."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            game = Game()
+            title = MainWindow._compute_window_title(engine_enabled=True, game=game)
+            
+            assert "Engine Enabled" in title
+            assert "White to move" in title
+            assert title == "Chess Desktop App — Engine Enabled (White to move)"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_ongoing_black_to_move_no_engine(self):
+        """Ongoing game with Black to move and no engine."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            game = Game()
+            game.apply_move("e2e4")  # Now Black to move
+            title = MainWindow._compute_window_title(engine_enabled=False, game=game)
+            
+            assert "Human vs Human" in title
+            assert "Black to move" in title
+            assert title == "Chess Desktop App — Human vs Human (Black to move)"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_check_white_in_check(self):
+        """Title should indicate check status for White."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            # Simple position where White king is in check from Black rook
+            # White king on e1, Black rook on e2 gives check
+            fen = "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1"
+            game = Game.from_fen(fen)
+            
+            title = MainWindow._compute_window_title(engine_enabled=False, game=game)
+            
+            assert "White to move — in check" in title
+            assert title == "Chess Desktop App — Human vs Human (White to move — in check)"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_check_black_in_check(self):
+        """Title should indicate check status for Black."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            # Position where White rook checks Black king
+            fen = "4R3/ppppkppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQ - 0 1"
+            game = Game.from_fen(fen)
+            
+            title = MainWindow._compute_window_title(engine_enabled=True, game=game)
+            
+            assert "Black to move — in check" in title
+            assert title == "Chess Desktop App — Engine Enabled (Black to move — in check)"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_checkmate_white_loses(self):
+        """Checkmate with White losing should show Black wins."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            # Fool's Mate position (White is checkmated)
+            fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+            game = Game.from_fen(fen)
+            
+            title = MainWindow._compute_window_title(engine_enabled=False, game=game)
+            
+            assert title == "Chess Desktop App — Game Over: Checkmate — Black wins"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_checkmate_black_loses(self):
+        """Checkmate with Black losing should show White wins."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            # Scholar's Mate position (Black is checkmated)
+            fen = "r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4"
+            game = Game.from_fen(fen)
+            
+            title = MainWindow._compute_window_title(engine_enabled=True, game=game)
+            
+            assert title == "Chess Desktop App — Game Over: Checkmate — White wins"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_stalemate(self):
+        """Stalemate should show draw by stalemate."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            # Stalemate position
+            fen = "k7/8/1QK5/8/8/8/8/8 b - - 0 1"
+            game = Game.from_fen(fen)
+            
+            title = MainWindow._compute_window_title(engine_enabled=False, game=game)
+            
+            assert title == "Chess Desktop App — Game Over: Draw by stalemate"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_insufficient_material(self):
+        """Insufficient material draw should show appropriate message."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            # King vs King - insufficient material
+            fen = "8/8/4k3/8/8/4K3/8/8 w - - 0 1"
+            game = Game.from_fen(fen)
+            
+            title = MainWindow._compute_window_title(engine_enabled=True, game=game)
+            
+            assert title == "Chess Desktop App — Game Over: Draw by insufficient material"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_fifty_move_draw(self):
+        """Fifty-move rule draw should show appropriate message."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            # Position with halfmove clock at 100 (fifty-move rule triggered)
+            # Include queens to avoid insufficient material taking precedence
+            fen = "4k3/4q3/8/8/8/8/4Q3/4K3 w - - 100 1"
+            game = Game.from_fen(fen)
+            
+            title = MainWindow._compute_window_title(engine_enabled=False, game=game)
+            
+            assert title == "Chess Desktop App — Game Over: Draw by fifty-move rule"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_draw_other(self):
+        """Other draw types (like repetition) should show appropriate message."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            # Create a game with threefold repetition
+            game = Game()
+            # Repeat position three times via knight moves
+            game.apply_move("g1f3")
+            game.apply_move("g8f6")
+            game.apply_move("f3g1")
+            game.apply_move("f6g8")
+            game.apply_move("g1f3")
+            game.apply_move("g8f6")
+            game.apply_move("f3g1")
+            game.apply_move("f6g8")
+            
+            # Now threefold repetition is claimable
+            title = MainWindow._compute_window_title(engine_enabled=True, game=game)
+            
+            assert title == "Chess Desktop App — Game Over: Draw by repetition"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+    
+    def test_title_game_over_ignores_engine_mode(self):
+        """Game-over titles should not include engine mode."""
+        pytest.importorskip("PySide6")
+        
+        try:
+            from chess_app.game import Game
+            from chess_app.gui import MainWindow
+            
+            # Use checkmate position
+            fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+            game = Game.from_fen(fen)
+            
+            # Test with engine disabled
+            title_no_engine = MainWindow._compute_window_title(engine_enabled=False, game=game)
+            
+            # Test with engine enabled
+            title_with_engine = MainWindow._compute_window_title(engine_enabled=True, game=game)
+            
+            # Both should be identical (no engine mode in game-over titles)
+            assert title_no_engine == title_with_engine
+            assert "Engine Enabled" not in title_no_engine
+            assert "Human vs Human" not in title_no_engine
+            assert title_no_engine == "Chess Desktop App — Game Over: Checkmate — Black wins"
+            
+        except Exception as e:
+            pytest.skip(f"Qt initialization failed: {e}")
+

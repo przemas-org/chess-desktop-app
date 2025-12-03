@@ -48,7 +48,7 @@ class TestMainWindowInstantiation:
             
             window = MainWindow()
             assert window is not None
-            assert window.windowTitle() == "Chess Desktop App"
+            assert window.windowTitle() == "Chess Desktop App — Human vs Human"
             assert window.width() == 800
             assert window.height() == 600
             

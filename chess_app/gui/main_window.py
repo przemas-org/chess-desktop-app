@@ -49,7 +49,8 @@ class MainWindow(QMainWindow):
         self._input_enabled: bool = False
         
         # Set initial window title (no engine yet)
-        self._update_window_title()
+        title = self._compute_window_title(self._engine_enabled, self._game)
+        self.setWindowTitle(title)
         
         # Connect board widget signals
         self._board_widget.square_clicked.connect(self._on_square_clicked)
@@ -110,7 +111,8 @@ class MainWindow(QMainWindow):
         self._engine_enabled = True
         
         # Update window title to reflect engine availability
-        self._update_window_title()
+        title = self._compute_window_title(self._engine_enabled, self._game)
+        self.setWindowTitle(title)
         
         # Connect controller signals
         self._engine_controller.engine_move_applied.connect(
@@ -362,7 +364,8 @@ class MainWindow(QMainWindow):
             reason: Human-readable description of why engine was disabled.
         """
         self._engine_enabled = False
-        self._update_window_title()
+        title = self._compute_window_title(self._engine_enabled, self._game)
+        self.setWindowTitle(title)
     
     @staticmethod
     def _get_result_description(status: GameStatus, side_to_move: Side) -> str:
@@ -430,6 +433,74 @@ class MainWindow(QMainWindow):
         else:
             return f"{side_name} to move"
     
+    @staticmethod
+    def _compute_window_title(
+        engine_enabled: bool,
+        game: Optional[Game] = None
+    ) -> str:
+        """Compute window title based on engine availability and game state.
+        
+        This is the single source of truth for window title computation.
+        It centralizes all title-related logic, replacing scattered ad-hoc
+        title construction throughout the codebase.
+        
+        Title format depends on game state:
+        - No game set: "Chess Desktop App — [Engine Mode]"
+        - Ongoing game: "Chess Desktop App — [Engine Mode] ([Status])"
+        - Game over: "Chess Desktop App — Game Over: [Result]"
+        
+        Note that game-over titles do NOT include engine mode, as the
+        engine/human distinction is not relevant to the final result.
+        
+        Args:
+            engine_enabled: Whether engine is currently enabled.
+            game: Optional Game instance for status/side queries. If None,
+                  returns base title with engine mode only.
+        
+        Returns:
+            Complete window title string suitable for setWindowTitle().
+            
+        Examples:
+            >>> MainWindow._compute_window_title(False, None)
+            'Chess Desktop App — Human vs Human'
+            >>> MainWindow._compute_window_title(True, None)
+            'Chess Desktop App — Engine Enabled'
+        """
+        # Base application title
+        base_title = "Chess Desktop App"
+        
+        # Determine engine mode suffix
+        if engine_enabled:
+            engine_mode = " — Engine Enabled"
+        else:
+            engine_mode = " — Human vs Human"
+        
+        # If no game is set, return base title with engine mode
+        if game is None:
+            return base_title + engine_mode
+        
+        # Query game state
+        status = game.get_status()
+        side_to_move = game.get_side_to_move()
+        
+        # Check if terminal state
+        terminal_statuses = {
+            GameStatus.CHECKMATE,
+            GameStatus.STALEMATE,
+            GameStatus.DRAW_INSUFFICIENT_MATERIAL,
+            GameStatus.DRAW_50_MOVE,
+            GameStatus.DRAW_OTHER
+        }
+        
+        if status in terminal_statuses:
+            # Terminal state: show game-over format without engine mode
+            result_description = MainWindow._get_result_description(status, side_to_move)
+            return f"{base_title} — Game Over: {result_description}"
+        else:
+            # Ongoing game: show engine mode and game status
+            ongoing_text = MainWindow._get_ongoing_status_text(status, side_to_move)
+            return f"{base_title}{engine_mode} ({ongoing_text})"
+    
     def _handle_game_end(self, status: GameStatus, side_to_move: Side) -> None:
         """Handle terminal game states with modal dialog and title update.
         
@@ -463,8 +534,8 @@ class MainWindow(QMainWindow):
         )
         
         # Update window title to game-over format
-        base_title = "Chess Desktop App"
-        self.setWindowTitle(f"{base_title} — Game Over: {result_description}")
+        title = self._compute_window_title(self._engine_enabled, self._game)
+        self.setWindowTitle(title)
     
     def _evaluate_and_handle_game_status(self) -> None:
         """Evaluate current game status and handle terminal states or update title.
@@ -502,31 +573,7 @@ class MainWindow(QMainWindow):
             # Handle game end
             self._handle_game_end(status, side_to_move)
         else:
-            # Update title with ongoing status
-            ongoing_text = self._get_ongoing_status_text(status, side_to_move)
-            
-            # Preserve engine availability info in title
-            if self._engine_enabled:
-                base = "Chess Desktop App — Engine Enabled"
-            else:
-                base = "Chess Desktop App — Human vs Human"
-            
-            self.setWindowTitle(f"{base} ({ongoing_text})")
-    
-    def _update_window_title(self) -> None:
-        """Update the window title based on engine availability.
-        
-        Sets the window title to indicate whether engine features are enabled:
-        - "Chess Desktop App - Engine Enabled" when engine is available
-        - "Chess Desktop App - Human vs Human" when engine is not available
-        
-        This method is called:
-        - On initialization (before engine setup)
-        - After successful engine adapter setup
-        - When engine is disabled due to errors
-        """
-        if self._engine_enabled:
-            self.setWindowTitle("Chess Desktop App - Engine Enabled")
-        else:
-            self.setWindowTitle("Chess Desktop App - Human vs Human")
+            # Update title for ongoing game
+            title = self._compute_window_title(self._engine_enabled, self._game)
+            self.setWindowTitle(title)
 
