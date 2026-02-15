@@ -1,4 +1,24 @@
-<!-- 50c3492f-f520-4880-b00d-bac9a1887ae4 4dcac0e3-536d-4637-8586-0cfd40e9029f -->
+---
+name: Human vs AI Gameplay Loop Design
+overview: ""
+todos:
+  - id: 3c6498f6-d54c-486c-bdc7-b704bbf8f8f1
+    content: Add centralized game-status evaluation and game-end handling in the main window controller, including modal messages, title updates, and input locking.
+    status: pending
+  - id: 9f969b52-728f-4c14-85fd-23739a5190c4
+    content: Introduce and enforce a GUI-level input-enabled flag in the main window, short-circuiting all board interaction when the game is over.
+    status: pending
+  - id: 7dca4137-0454-48f5-a44e-8f068616b684
+    content: Update the engine controller to skip engine move requests when the game status is not ongoing or check.
+    status: pending
+  - id: 465d2501-948d-41f2-8fc0-070733bac468
+    content: Extend engine-disabled handling in the main window to show a minimal message box and update title to indicate fallback to Human vs Human mode.
+    status: pending
+  - id: 845f5394-43d7-4887-af8e-b94eff2662be
+    content: Plan and implement or update tests around the human-vs-engine loop, game-end detection, input locking, and engine failure behavior using the existing fake engine adapter.
+    status: pending
+---
+
 # Human vs AI Gameplay Loop Design
 
 ## 1. Summary
@@ -197,11 +217,3 @@ Implement a complete Human (White) vs Engine (Black) gameplay loop on top of the
 
 1. Exact phrasing of game-end and engine-error messages (e.g., whether to include technical detail or keep them strictly minimal) may be refined during implementation but will default to short, user-friendly text.
 2. The precise format of ongoing-status information in the window title (e.g., whether to show “White to move” vs. omitting it) can be tuned based on user feedback without affecting the architecture, as long as the title remains the sole persistent status display.
-
-### To-dos
-
-- [ ] Add centralized game-status evaluation and game-end handling in the main window controller, including modal messages, title updates, and input locking.
-- [ ] Introduce and enforce a GUI-level input-enabled flag in the main window, short-circuiting all board interaction when the game is over.
-- [ ] Update the engine controller to skip engine move requests when the game status is not ongoing or check.
-- [ ] Extend engine-disabled handling in the main window to show a minimal message box and update title to indicate fallback to Human vs Human mode.
-- [ ] Plan and implement or update tests around the human-vs-engine loop, game-end detection, input locking, and engine failure behavior using the existing fake engine adapter.
